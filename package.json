@@ -1,6 +1,6 @@
 {
-  "name": "nextjs_tailwind_shadcn_ts",
-  "version": "0.1.0",
+  "name": "lims-laboratorio-sistema-gestion",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000 2>&1 | tee dev.log",
@@ -40,7 +40,7 @@
     "test:all": "bun run test && bun run type-check",
     "security:check": "bunx audit",
     "dependencies:check": "bunx npm outdated",
-    "cache:clear": "rm -rf .next node_modules/.cache",
+    "cache:clear": "rm -rf .next out node_modules/.cache",
     "cache:next": "rm -rf .next/cache",
     "cache:node": "rm -rf node_modules/.cache",
     "cache:browser": "rm -rf .next/server/app",
@@ -54,7 +54,7 @@
     "deploy:check": "npx vercel whoami",
     "dev:fast": "NODE_OPTIONS='--max-old-space-size=4096' bun run dev",
     "dev:debug": "NODE_OPTIONS='--inspect' bun run dev",
-    "dev:analyze": "bunx vite-bundle-visualizer"
+    "dev:analyze": "bunx vite-bundle-visualizer",
     "prepare": "playwright install"
   },
   "dependencies": {
