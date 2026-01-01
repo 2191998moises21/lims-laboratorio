@@ -1,0 +1,134 @@
+steps:
+  # -------------------------------------------------------------------------
+  # PASO 1: CONSTRUIR IMAGEN DOCKER
+  # -------------------------------------------------------------------------
+  - name: 'Build Docker Image'
+    id: build
+    waitFor: ['-']
+    timeout: '1800s'
+    entrypoint: '/bin/sh'
+    args:
+      - '-c'
+      - |
+        echo "=================================================="
+        echo "PASO 1: Construyendo imagen Docker"
+        echo "=================================================="
+
+        # Mostrar información del build
+        echo "Branch: $BRANCH_NAME"
+        echo "Commit: $COMMIT_SHA"
+        echo "Author: $REPO_OWNER"
+
+        # Build de la imagen Docker
+        echo "Construyendo imagen Docker..."
+        docker build -t gcr.io/$PROJECT_ID/lims-app:$SHORT_SHA -t gcr.io/$PROJECT_ID/lims-app:latest .
+
+        # Mostrar tamaño de la imagen
+        echo "Información de la imagen:"
+        docker images gcr.io/$PROJECT_ID/lims-app:latest
+    volumes:
+      - name: 'docker'
+        path: '/var/run/docker.sock'
+    env:
+      - 'SHORT_SHA=$SHORT_SHA'
+      - 'COMMIT_SHA=$COMMIT_SHA'
+
+  # -------------------------------------------------------------------------
+  # PASO 2: SUBIR IMAGEN A GOOGLE CONTAINER REGISTRY
+  # -------------------------------------------------------------------------
+  - name: 'Push Docker Image'
+    id: push
+    waitFor: ['build']
+    timeout: '600s'
+    entrypoint: '/bin/sh'
+    args:
+      - '-c'
+      - |
+        echo "=================================================="
+        echo "PASO 2: Subiendo imagen Docker a Google Container Registry"
+        echo "=================================================="
+
+        # Subir imagen a Google Container Registry
+        echo "Subiendo imagen..."
+        docker push gcr.io/$PROJECT_ID/lims-app:$SHORT_SHA
+        docker push gcr.io/$PROJECT_ID/lims-app:latest
+
+        echo "Imagen subida exitosamente"
+        echo "Image URL: gcr.io/$PROJECT_ID/lims-app:$SHORT_SHA"
+        echo "Latest URL: gcr.io/$PROJECT_ID/lims-app:latest"
+    env:
+      - 'SHORT_SHA=$SHORT_SHA'
+
+  # -------------------------------------------------------------------------
+  # PASO 3: DESPLEGAR A GOOGLE APP ENGINE
+  # -------------------------------------------------------------------------
+  - name: 'Deploy to App Engine'
+    id: deploy
+    waitFor: ['push']
+    timeout: '1800s'
+    entrypoint: '/bin/sh'
+    args:
+      - '-c'
+      - |
+        echo "=================================================="
+        echo "PASO 3: Desplegando a Google App Engine"
+        echo "=================================================="
+
+        # Crear archivo app.yaml si no existe
+        cat > app.yaml << EOF
+runtime: custom
+env: flex
+automatic_scaling:
+  min_instances: 1
+  max_instances: 10
+  target_cpu_utilization: 0.6
+  target_concurrent_requests: 10
+EOF
+
+        echo "Configuración de App Engine:"
+        cat app.yaml
+
+        # Desplegar a App Engine
+        echo "Desplegando aplicación..."
+        gcloud app deploy --quiet \
+          --project=$PROJECT_ID \
+          --version=$SHORT_SHA \
+          --image-url=gcr.io/$PROJECT_ID/lims-app:$SHORT_SHA
+
+        # Obtener URL de la aplicación
+        SERVICE_URL=$(gcloud app describe --project=$PROJECT_ID --format="value(defaultVersion.hostname)")
+
+        echo "=================================================="
+        echo "✅ DESPLIEGUE COMPLETO"
+        echo "=================================================="
+        echo "Service URL: https://$SERVICE_URL"
+        echo "Version: $SHORT_SHA"
+        echo "Image: gcr.io/$PROJECT_ID/lims-app:$SHORT_SHA"
+
+        # Health check
+        echo "Verificando health check..."
+        sleep 10
+        curl -f https://$SERVICE_URL/api/health || echo "⚠️  Health check falló, pero el despliegue completó"
+    env:
+      - 'SHORT_SHA=$SHORT_SHA'
+      - 'PROJECT_ID=$PROJECT_ID'
+
+# -------------------------------------------------------------------------
+  # TIMEOUTS Y CONFIGURACIÓN DE LOGS
+# -------------------------------------------------------------------------
+timeout: '1800s'
+
+logsBucket: 'gs://$PROJECT_ID-logs'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'  # Use una máquina más poderosa para el build
+  diskSizeGb: 100
+  substitutionOption: 'ALLOW_LOOSE'
+
+# -------------------------------------------------------------------------
+  # VARIABLES DE SUSTITUCIÓN (SE LLENAN AUTOMÁTICAMENTE)
+# -------------------------------------------------------------------------
+substitutions:
+  _BRANCH_NAME: 'main'
+  _COMMIT_SHA: 'latest'
