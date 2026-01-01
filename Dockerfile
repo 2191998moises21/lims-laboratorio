@@ -35,8 +35,9 @@ WORKDIR /app
 
 # Copiar solo archivos de gestión de paquetes (no código fuente)
 # Esto aprovecha el cache de Docker para builds repetitivos
+# NOTA: El archivo se llama "bun.lock" (sin extensión)
 COPY package.json ./
-COPY bun.lockb* ./
+COPY bun.lock* ./
 
 # Instalar dependencias de producción
 # NOTA: Usamos bun install porque el proyecto usa Bun
