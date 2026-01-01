@@ -2,6 +2,41 @@ import { NextAuthOptions } from 'next-auth'
 import CredentialsProvider from 'next-auth/providers/credentials'
 import { db } from '@/lib/db'
 import bcrypt from 'bcryptjs'
+import { headers } from 'next/headers'
+import {
+  isAccountLocked,
+  recordFailedLoginAttempt,
+  clearFailedLoginAttempts,
+} from '@/lib/rate-limit'
+
+/**
+ * Obtiene la IP del cliente desde los headers del request
+ */
+function getClientIPFromHeaders(): string {
+  try {
+    const headersList = headers()
+    return (
+      headersList.get('x-forwarded-for')?.split(',')[0].trim() ||
+      headersList.get('x-real-ip') ||
+      headersList.get('cf-connecting-ip') ||
+      'unknown'
+    )
+  } catch {
+    return 'unknown'
+  }
+}
+
+/**
+ * Obtiene el User Agent desde los headers del request
+ */
+function getUserAgentFromHeaders(): string {
+  try {
+    const headersList = headers()
+    return headersList.get('user-agent') || 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -16,15 +51,25 @@ export const authOptions: NextAuthOptions = {
           throw new Error('Credenciales incompletas')
         }
 
+        const email = credentials.email.toLowerCase().trim()
+
+        // Verificar si la cuenta está bloqueada por intentos fallidos
+        const lockStatus = isAccountLocked(email)
+        if (lockStatus.locked) {
+          throw new Error(
+            `Cuenta bloqueada temporalmente. Intente nuevamente en ${lockStatus.retryAfter} segundos.`
+          )
+        }
+
         // Buscar usuario por email
         const user = await db.user.findUnique({
-          where: {
-            email: credentials.email
-          }
+          where: { email }
         })
 
         if (!user) {
-          throw new Error('Usuario no encontrado')
+          // Registrar intento fallido
+          recordFailedLoginAttempt(email)
+          throw new Error('Credenciales inválidas')
         }
 
         // Verificar si el usuario está activo
@@ -39,8 +84,17 @@ export const authOptions: NextAuthOptions = {
         )
 
         if (!isPasswordValid) {
-          throw new Error('Contraseña incorrecta')
+          // Registrar intento fallido
+          recordFailedLoginAttempt(email)
+          throw new Error('Credenciales inválidas')
         }
+
+        // Login exitoso - limpiar intentos fallidos
+        clearFailedLoginAttempts(email)
+
+        // Obtener información del request para auditoría
+        const ipAddress = getClientIPFromHeaders()
+        const userAgent = getUserAgentFromHeaders()
 
         // Actualizar último login
         await db.user.update({
@@ -48,7 +102,7 @@ export const authOptions: NextAuthOptions = {
           data: { lastLoginAt: new Date() }
         })
 
-        // Crear entrada de auditoría para login
+        // Crear entrada de auditoría para login con IP y UserAgent
         await db.auditLog.create({
           data: {
             userId: user.id,
@@ -56,8 +110,12 @@ export const authOptions: NextAuthOptions = {
             entityType: 'User',
             entityId: user.id,
             entityName: user.name,
-            ipAddress: '', // TODO: Obtener IP real del request
-            userAgent: '' // TODO: Obtener user agent real
+            ipAddress,
+            userAgent,
+            changes: JSON.stringify({
+              loginTime: new Date().toISOString(),
+              method: 'credentials'
+            })
           }
         })
 
