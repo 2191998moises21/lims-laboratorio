@@ -2,20 +2,33 @@
 # DOCKERFILE PARA SISTEMA DE GESTIÓN LABORATORIAL (NEXT.JS 16)
 # =============================================================================
 # Compatibilidad: Google Cloud Build, Google App Engine, Google Cloud Run
-# Runtime: Node.js 20
-# Base: Alpine Linux 3.21 (optimizado para tamaño)
+# Runtime: Node.js 20 (Slim - Debian-based)
+# Base: Debian Bookworm (stable, con libvips disponible)
 # =============================================================================
 
 # -------------------------------------------------------------------------
 # ETAPA 1: IMAGEN BASE (DEPENDENCIAS)
 # -------------------------------------------------------------------------
-FROM node:20-alpine AS deps
+FROM node:20-slim AS deps
 
-# Instalar dependencias necesarias para sharp (procesamiento de imágenes)
-RUN apk add --no-cache \
-    libvips \
+# Instalar dependencias necesarias para Sharp (procesamiento de imágenes)
+# libvips-dev: Librerías de desarrollo para Sharp
+# libvips: Librerías runtime para Sharp
+# libglib2.0-dev: Dependencia para libvips
+# libglib2.0-0: Dependencia runtime para libvips
+# build-essential: Compiladores y herramientas (gcc, make)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libvips-dev \
-    && rm -rf /var/cache/apk/*
+    libvips \
+    libglib2.0-dev \
+    libglib2.0-0 \
+    libexpat1-dev \
+    libexpat1 \
+    build-essential \
+    python3 \
+    make \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 # Establecer directorio de trabajo
 WORKDIR /app
@@ -28,20 +41,19 @@ COPY package.json package-lock.json bun.lockb* ./
 COPY prisma ./prisma
 
 # Instalar dependencias de producción
-# --frozen-lockfile: Asegura que use lockfile exacto (reproducible)
-RUN bun install --frozen-lockfile --production
+RUN npm ci --only=production --ignore-scripts
 
 # -------------------------------------------------------------------------
 # ETAPA 2: BUILD DE LA APLICACIÓN (NEXT.JS)
 # -------------------------------------------------------------------------
-FROM node:20-alpine AS builder
+FROM node:20-slim AS builder
 
 # Instalar dependencias necesarias para el build
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     make \
     g++ \
-    && rm -rf /var/cache/apk/*
+    && rm -rf /var/lib/apt/lists/*
 
 # Establecer directorio de trabajo
 WORKDIR /app
@@ -49,30 +61,31 @@ WORKDIR /app
 # Copiar dependencias instaladas desde la etapa deps
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/package.json ./package.json
+COPY --from=deps /app/package-lock.json ./package-lock.json
 COPY --from=deps /app/prisma ./prisma
 
 # Copiar código fuente del proyecto
 COPY . .
 
 # Generar cliente Prisma
-RUN bun run db:generate
+RUN npx prisma generate
 
 # Build de Next.js para producción
 # .next/standalone: Contiene todo lo necesario para ejecutar la app
-RUN bun run build
+RUN npm run build
 
 # -------------------------------------------------------------------------
 # ETAPA 3: IMAGEN FINAL (RUNTIME)
 # -------------------------------------------------------------------------
-FROM node:20-alpine AS runner
+FROM node:20-slim AS runner
 
-# Instalar dependencias de runtime necesarias para sharp
-RUN apk add --no-cache \
+# Instalar dependencias de runtime necesarias para Sharp
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libvips \
-    libc6-compat \
-    libstdc++ \
+    libglib2.0-0 \
+    libexpat1 \
     curl \
-    && rm -rf /var/cache/apk/*
+    && rm -rf /var/lib/apt/lists/*
 
 # Establecer directorio de trabajo
 WORKDIR /app
@@ -81,8 +94,8 @@ WORKDIR /app
 COPY package.json ./
 
 # Crear usuario no root por seguridad (mejor práctica)
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S -u 1001 -G nodejs -s /bin/sh nodejs
+RUN groupadd -r 1001 -S nodejs && \
+    useradd -r -u 1001 -G nodejs -s /bin/sh nodejs
 
 # Copiar build desde la etapa builder
 # .next/standalone: Contiene servidor y assets
