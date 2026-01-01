@@ -55,7 +55,7 @@
     "dev:fast": "NODE_OPTIONS='--max-old-space-size=4096' bun run dev",
     "dev:debug": "NODE_OPTIONS='--inspect' bun run dev",
     "dev:analyze": "bunx vite-bundle-visualizer",
-    "prepare": "playwright install"
+    "prepare": "npx playwright install"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
