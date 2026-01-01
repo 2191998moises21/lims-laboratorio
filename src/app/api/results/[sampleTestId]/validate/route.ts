@@ -47,14 +47,6 @@ export async function POST(
       )
     }
 
-    // Verificar estado
-    if (sampleTest.status !== 'AWAITING_VALIDATION') {
-      return NextResponse.json(
-        { error: 'La prueba debe estar en estado de "Por Validar"' },
-        { status: 400 }
-      )
-    }
-
     // Actualizar estado de la prueba
     const newStatus = isValid ? 'COMPLETED' : 'AWAITING_VALIDATION'
     const updateData: any = {
@@ -68,7 +60,7 @@ export async function POST(
       data: updateData
     })
 
-    // Si se valida y todas las pruebas de la muestra están completadas, actualizar estado de la muestra
+    // Si todas las pruebas de la muestra están completadas, actualizar estado de la muestra
     if (isValid) {
       const allTests = await db.sampleTest.findMany({
         where: { sampleId: sampleTest.sampleId }
