@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
     const dateFrom = searchParams.get('dateFrom') || ''
     const dateTo = searchParams.get('dateTo') || ''
     const category = searchParams.get('category') || ''
-    const export = searchParams.get('export') || '' // Parámetro para exportar a CSV
+    const shouldExport = searchParams.get('export') || '' // Parámetro para exportar a CSV
 
     // Construir where clause
     const where: any = {}
@@ -57,17 +57,19 @@ export async function GET(request: NextRequest) {
     }
 
     if (dateFrom || dateTo) {
-      where.timestamp = {}
+      const timestamp: any = {}
       
       if (dateFrom) {
-        where.timestamp.gte = new Date(dateFrom)
+        timestamp.gte = new Date(dateFrom)
       }
       
       if (dateTo) {
         const dateToMidnight = new Date(dateTo)
         dateToMidnight.setHours(23, 59, 59, 999)
-        where.timestamp.lte = dateToMidnight
+        timestamp.lte = dateToMidnight
       }
+      
+      where.timestamp = timestamp
     }
 
     // Filtrar por categoría (tipo de entidad)
@@ -95,7 +97,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Si se solicita exportación CSV
-    if (export === 'true') {
+    if (shouldExport === 'true') {
       // Obtener logs sin límite para exportación completa
       const auditLogs = await db.auditLog.findMany({
         where,
@@ -126,7 +128,7 @@ export async function GET(request: NextRequest) {
         'Cambios'
       ]
 
-      const csvRows = auditLogs.map(log => {
+      const csvRows = auditLogs.map((log: any) => {
         const changesParsed = JSON.parse(log.changes)
         const changesString = JSON.stringify(changesParsed)
           .replace(/"/g, '')
@@ -154,8 +156,6 @@ export async function GET(request: NextRequest) {
 
       // Crear respuesta CSV con BOM (Byte Order Mark) para Excel
       const csv = '\uFEFF' + csvContent
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-      const url = URL.createObjectURL(blob)
 
       return new NextResponse(csv, {
         status: 200,
