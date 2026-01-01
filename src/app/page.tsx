@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import { useSession, signOut } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -10,6 +11,13 @@ import { Loader2, LogOut, User, Shield, FlaskConical, FileText, Activity, Packag
 export default function DashboardPage() {
   const { data: session, status } = useSession()
   const router = useRouter()
+
+  // Navegar a login si no está autenticado (usando useEffect para evitar error de React 19)
+  useEffect(() => {
+    if (status === 'unauthenticated') {
+      router.push('/login')
+    }
+  }, [status, router])
 
   const handleLogout = async () => {
     await signOut({ callbackUrl: '/login' })
@@ -37,8 +45,7 @@ export default function DashboardPage() {
   }
 
   if (status === 'unauthenticated') {
-    router.push('/login')
-    return null
+    return null // La redirección se maneja en useEffect
   }
 
   return (
@@ -119,7 +126,7 @@ export default function DashboardPage() {
                 <CardDescription>Ingresar muestra al sistema</CardDescription>
               </CardHeader>
               <CardContent>
-                <Button 
+                <Button
                   className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700"
                   onClick={() => router.push('/samples/new')}
                 >
@@ -135,7 +142,7 @@ export default function DashboardPage() {
                 <CardDescription>Ver métricas y estadísticas</CardDescription>
               </CardHeader>
               <CardContent>
-                <Button 
+                <Button
                   className="w-full border-slate-300"
                   onClick={() => router.push('/dashboard/executive')}
                 >
@@ -150,7 +157,7 @@ export default function DashboardPage() {
                 <CardDescription>Ver resultados e informes</CardDescription>
               </CardHeader>
               <CardContent>
-                <Button 
+                <Button
                   className="w-full border-slate-300"
                   onClick={() => router.push('/results')}
                 >
@@ -166,7 +173,7 @@ export default function DashboardPage() {
                 <CardDescription>Gestión de reactivos</CardDescription>
               </CardHeader>
               <CardContent>
-                <Button 
+                <Button
                   className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700"
                   onClick={() => router.push('/reagents')}
                 >
@@ -182,7 +189,7 @@ export default function DashboardPage() {
                 <CardDescription>Gestión de equipos e instrumentos</CardDescription>
               </CardHeader>
               <CardContent>
-                <Button 
+                <Button
                   className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700"
                   onClick={() => router.push('/equipment')}
                 >
@@ -198,7 +205,7 @@ export default function DashboardPage() {
                 <CardDescription>Registro de acciones</CardDescription>
               </CardHeader>
               <CardContent>
-                <Button 
+                <Button
                   className="w-full border-slate-300"
                   onClick={() => router.push('/audit')}
                 >
@@ -214,7 +221,7 @@ export default function DashboardPage() {
                 <CardDescription>Ajustes del sistema</CardDescription>
               </CardHeader>
               <CardContent>
-                <Button 
+                <Button
                   className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700"
                   onClick={() => router.push('/settings')}
                 >
