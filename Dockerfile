@@ -33,15 +33,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Establecer directorio de trabajo
 WORKDIR /app
 
-# Copiar archivos de gestión de paquetes
-COPY package.json package-lock.json bun.lockb* ./
-
-# Copiar solo archivos de dependencias del proyecto (no código fuente)
+# Copiar solo archivos de gestión de paquetes (no código fuente)
 # Esto aprovecha el cache de Docker para builds repetitivos
-COPY prisma ./prisma
+COPY package.json ./
+COPY bun.lockb* ./
 
 # Instalar dependencias de producción
-RUN npm ci --only=production --ignore-scripts
+# NOTA: Usamos bun install porque el proyecto usa Bun
+RUN bun install --frozen-lockfile --production
 
 # -------------------------------------------------------------------------
 # ETAPA 2: BUILD DE LA APLICACIÓN (NEXT.JS)
@@ -61,8 +60,6 @@ WORKDIR /app
 # Copiar dependencias instaladas desde la etapa deps
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/package.json ./package.json
-COPY --from=deps /app/package-lock.json ./package-lock.json
-COPY --from=deps /app/prisma ./prisma
 
 # Copiar código fuente del proyecto
 COPY . .
@@ -72,7 +69,7 @@ RUN npx prisma generate
 
 # Build de Next.js para producción
 # .next/standalone: Contiene todo lo necesario para ejecutar la app
-RUN npm run build
+RUN bun run build
 
 # -------------------------------------------------------------------------
 # ETAPA 3: IMAGEN FINAL (RUNTIME)
