@@ -1,0 +1,16 @@
+{
+  "name": "pdf-reports-service",
+  "version": "1.0.0",
+  "description": "Mini servicio para generar PDFs de informes de laboratorio",
+  "main": "index.ts",
+  "scripts": {
+    "dev": "bun --hot index.ts",
+    "start": "bun index.ts"
+  },
+  "dependencies": {
+    "z-ai-web-dev-sdk": "^0.0.15"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

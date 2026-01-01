@@ -1,0 +1,579 @@
+// This is your Prisma schema file,
+// Software de Gestión para Laboratorios de Bioanálisis (Área de Bacteriología)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum UserRole {
+  ADMIN
+  BIOANALYST
+  LAB_ASSISTANT
+}
+
+enum SampleStatus {
+  RECEIVED
+  IN_PROGRESS
+  ANALYZED
+  COMPLETED
+  CANCELLED
+}
+
+enum SampleCollectionMethod {
+  VENIPUNCTURE
+  SWAB
+  URINE
+  STOOL
+  THROAT
+  NASAL
+  WOUND
+  CATHETER
+  OTHER
+}
+
+enum TestStatus {
+  PENDING
+  IN_PROGRESS
+  AWAITING_VALIDATION
+  COMPLETED
+  CANCELLED
+}
+
+enum ResultType {
+  QUANTITATIVE
+  QUALITATIVE
+  TEXT
+}
+
+enum QualitativeResult {
+  POSITIVE
+  NEGATIVE
+  INDETERMINATE
+}
+
+enum ReagentTransactionType {
+  ENTRY
+  EXIT
+  ADJUSTMENT
+}
+
+enum MaintenanceType {
+  PREVENTIVE
+  CORRECTIVE
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  VALIDATE
+  INVALIDATE
+  EXPORT
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+// ============================================
+// USERS & ROLES
+// ============================================
+
+model User {
+  id                String   @id @default(cuid())
+  email             String   @unique
+  password          String
+  name              String
+  role              UserRole @default(LAB_ASSISTANT)
+  isActive          Boolean  @default(true)
+  lastLoginAt       DateTime?
+  phone             String?
+  signature         String?  // Firma digital para informes
+  language          String   @default("es")
+  notificationPreferences String? // JSON string with notification settings
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  createdSamples       Sample[]       @relation("CreatedBy")
+  assignedTests        SampleTest[]   @relation("AssignedTo")
+  auditLogs            AuditLog[]
+  validatedResults     TestResult[]   @relation("ValidatedBy")
+  validatedSampleTests SampleTest[]   @relation("ValidatedSampleTest")
+
+  @@index([email])
+  @@index([role])
+}
+
+// ============================================
+// PATIENTS
+// ============================================
+
+model Patient {
+  id                String   @id @default(cuid())
+  fullName          String
+  cedula            String   @unique // Cédula venezolana
+  dateOfBirth       DateTime
+  gender            String   // M, F, O
+  phone             String?
+  email             String?
+  address           String?
+  emergencyContact  String?
+  emergencyPhone    String?
+  bloodType         String?  // A+, A-, B+, B-, AB+, AB-, O+, O-
+  allergies         String?  // JSON string
+  medicalHistory    String?  // JSON string
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  samples           Sample[]
+
+  @@index([cedula])
+  @@index([fullName])
+}
+
+// ============================================
+// DOCTORS (Médicos Solicitantes)
+// ============================================
+
+model Doctor {
+  id                String   @id @default(cuid())
+  fullName          String
+  specialty         String?
+  licenseNumber     String?  // Número de registro
+  email             String?
+  phone             String?
+  healthCenter      String?  // Centro de salud
+  address           String?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  samples           Sample[]
+
+  @@index([fullName])
+  @@index([licenseNumber])
+}
+
+// ============================================
+// SAMPLES (Muestras)
+// ============================================
+
+model Sample {
+  id                String            @id @default(cuid())
+  sampleCode        String            @unique // Código único de muestra
+  patientId         String
+  doctorId          String?
+  collectionDate    DateTime
+  collectionTime    DateTime?
+  collectionMethod  SampleCollectionMethod
+  sampleType        String            // Sangre, Orina, Cultivo, etc.
+  status            SampleStatus      @default(RECEIVED)
+  priority          Priority          @default(MEDIUM)
+  clinicalNotes     String?           // Notas clínicas del médico
+  receivedAt        DateTime          @default(now())
+  completedAt       DateTime?
+  createdById       String            // Usuario que registró la muestra
+
+  // Relations
+  patient           Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor            Doctor?           @relation(fields: [doctorId], references: [id])
+  createdBy         User              @relation("CreatedBy", fields: [createdById], references: [id])
+  documents         SampleDocument[]
+  sampleTests       SampleTest[]
+
+  @@index([sampleCode])
+  @@index([patientId])
+  @@index([status])
+  @@index([priority])
+  @@index([receivedAt])
+}
+
+// ============================================
+// SAMPLE DOCUMENTS (Documentos adjuntos)
+// ============================================
+
+model SampleDocument {
+  id                String   @id @default(cuid())
+  sampleId          String
+  fileName          String
+  fileUrl           String
+  fileType          String
+  fileSize          Int
+  uploadedAt        DateTime @default(now())
+
+  // Relations
+  sample            Sample   @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+
+  @@index([sampleId])
+}
+
+// ============================================
+// TESTS (Pruebas configurables)
+// ============================================
+
+model Test {
+  id                String   @id @default(cuid())
+  name              String
+  code              String   @unique // Código único de prueba
+  description       String?
+  category          String?  // Categoría: Hematología, Bacteriología, etc.
+  sampleType        String   // Tipo de muestra requerida
+  method            String?  // Método de análisis
+  unit              String?  // Unidad de medida (ej: U/L, mg/dL)
+  referenceRangeInfo String? // Texto de rango de referencia general
+  interpretationCriteria String? // Criterios de interpretación (JSON)
+  isActive          Boolean  @default(true)
+  estimatedDuration Int?     // Duración estimada en horas
+  reportTemplateId  String?
+
+  // Relations
+  parameters        TestParameter[]
+  sampleTests       SampleTest[]
+  reportTemplate    ReportTemplate? @relation(fields: [reportTemplateId], references: [id])
+
+  @@index([code])
+  @@index([category])
+  @@index([isActive])
+}
+
+// ============================================
+// TEST PARAMETERS (Parámetros de pruebas)
+// ============================================
+
+model TestParameter {
+  id                String      @id @default(cuid())
+  testId            String
+  name              String
+  code              String      // Código del parámetro
+  resultType        ResultType  // QUANTITATIVE, QUALITATIVE, TEXT
+  unit              String?
+  minValue          Float?      // Para resultados cuantitativos
+  maxValue          Float?      // Para resultados cuantitativos
+  normalMin         Float?      // Rango normal mínimo
+  normalMax         Float?      // Rango normal máximo
+  criticalMin       Float?      // Valor crítico mínimo
+  criticalMax       Float?      // Valor crítico máximo
+  allowedValues     String?     // JSON string de valores permitidos (para cualitativos)
+  displayOrder      Int         @default(0)
+  isRequired        Boolean     @default(true)
+
+  // Relations
+  test              Test        @relation(fields: [testId], references: [id], onDelete: Cascade)
+
+  @@unique([testId, code])
+  @@index([testId])
+}
+
+// ============================================
+// SAMPLE TESTS (Asignación de pruebas a muestras)
+// ============================================
+
+model SampleTest {
+  id                String     @id @default(cuid())
+  sampleId          String
+  testId            String
+  status            TestStatus @default(PENDING)
+  assignedToId      String?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  validatedAt       DateTime?
+  validatedById     String?
+  resultsText       String?    // Observaciones generales
+  technique         String?    // Técnica específica utilizada
+  resultInterpretation String?  // Interpretación general
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  // Relations
+  sample            Sample     @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+  test              Test       @relation(fields: [testId], references: [id])
+  assignedTo        User?      @relation("AssignedTo", fields: [assignedToId], references: [id])
+  results           TestResult[]
+  validatedBy       User?      @relation("ValidatedSampleTest", fields: [validatedById], references: [id])
+
+  @@unique([sampleId, testId])
+  @@index([sampleId])
+  @@index([testId])
+  @@index([status])
+  @@index([assignedToId])
+}
+
+// ============================================
+// TEST RESULTS (Resultados de pruebas)
+// ============================================
+
+model TestResult {
+  id                String              @id @default(cuid())
+  sampleTestId      String
+  parameterId       String
+  quantitativeValue Float?              // Valor numérico
+  qualitativeValue  QualitativeResult?  // Valor cualitativo
+  textValue         String?             // Valor de texto
+  unit              String?             // Unidad del resultado
+  isAbnormal        Boolean             @default(false)
+  isCritical        Boolean             @default(false)
+  notes             String?             // Notas adicionales
+  validated         Boolean             @default(false)
+  validatedById     String?
+  validatedAt       DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  // Relations
+  sampleTest        SampleTest          @relation(fields: [sampleTestId], references: [id], onDelete: Cascade)
+  validatedBy       User?               @relation("ValidatedBy", fields: [validatedById], references: [id])
+  attachments       TestResultAttachment[]
+
+  @@index([sampleTestId])
+  @@index([parameterId])
+  @@index([validated])
+}
+
+// ============================================
+// TEST RESULT ATTACHMENTS (Imágenes/documentos de resultados)
+// ============================================
+
+model TestResultAttachment {
+  id                String   @id @default(cuid())
+  testResultId      String
+  fileName          String
+  fileUrl           String
+  fileType          String
+  fileSize          Int
+  description       String?
+  uploadedAt        DateTime @default(now())
+
+  // Relations
+  testResult        TestResult @relation(fields: [testResultId], references: [id], onDelete: Cascade)
+
+  @@index([testResultId])
+}
+
+// ============================================
+// REAGENTS (Inventario de reactivos)
+// ============================================
+
+model Reagent {
+  id                String   @id @default(cuid())
+  name              String
+  manufacturer      String
+  lotNumber         String   @unique
+  catalogNumber     String?
+  quantity          Float    // Cantidad disponible
+  unit              String   // mL, mg, etc.
+  minStockLevel     Float    // Nivel mínimo de stock para alerta
+  expiryDate        DateTime
+  receptionDate     DateTime @default(now())
+  storageLocation   String?  // Ubicación de almacenamiento
+  temperature       String?  // Temperatura de almacenamiento
+  category          String?  // Categoría: Cultivo, Tinción, etc.
+  isActive          Boolean  @default(true)
+  notes             String?
+
+  // Relations
+  transactions      ReagentTransaction[]
+
+  @@unique([name, lotNumber])
+  @@index([expiryDate])
+  @@index([quantity])
+  @@index([isActive])
+}
+
+// ============================================
+// REAGENT TRANSACTIONS (Movimientos de reactivos)
+// ============================================
+
+model ReagentTransaction {
+  id                String                   @id @default(cuid())
+  reagentId         String
+  transactionType   ReagentTransactionType  // ENTRY, EXIT, ADJUSTMENT
+  quantity          Float
+  previousQuantity  Float
+  newQuantity       Float
+  reason            String?                 // Motivo del movimiento
+  performedBy       String                  // Usuario que realizó el movimiento
+  referenceNumber   String?                 // Número de referencia (compra, pedido, etc.)
+  transactionDate   DateTime                @default(now())
+
+  // Relations
+  reagent           Reagent                 @relation(fields: [reagentId], references: [id], onDelete: Cascade)
+
+  @@index([reagentId])
+  @@index([transactionType])
+  @@index([transactionDate])
+}
+
+// ============================================
+// EQUIPMENT (Equipos e instrumentos)
+// ============================================
+
+model Equipment {
+  id                String   @id @default(cuid())
+  name              String
+  model             String?
+  serialNumber      String   @unique
+  manufacturer      String?
+  acquisitionDate   DateTime?
+  location          String?  // Ubicación en el laboratorio
+  status            String   @default("ACTIVE") // ACTIVE, INACTIVE, MAINTENANCE, RETIRED
+  calibrationInterval Int?   // Intervalo de calibración en días
+  isActive          Boolean  @default(true)
+  notes             String?
+
+  // Relations
+  calibrations      Calibration[]
+  maintenances      Maintenance[]
+
+  @@index([serialNumber])
+  @@index([status])
+  @@index([isActive])
+}
+
+// ============================================
+// CALIBRATIONS (Calibraciones de equipos)
+// ============================================
+
+model Calibration {
+  id                String   @id @default(cuid())
+  equipmentId       String
+  calibrationDate   DateTime
+  performedBy       String   // Técnico que realizó la calibración
+  results           String   // Resultados de la calibración
+  nextCalibrationDate DateTime?
+  notes             String?
+  certificateUrl    String?  // URL del certificado de calibración
+
+  // Relations
+  equipment         Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+
+  @@index([equipmentId])
+  @@index([calibrationDate])
+  @@index([nextCalibrationDate])
+}
+
+// ============================================
+// MAINTENANCE (Mantenimientos de equipos)
+// ============================================
+
+model Maintenance {
+  id                String          @id @default(cuid())
+  equipmentId       String
+  maintenanceType   MaintenanceType // PREVENTIVE, CORRECTIVE
+  maintenanceDate   DateTime
+  performedBy       String          // Técnico que realizó el mantenimiento
+  description       String          // Descripción del trabajo realizado
+  partsReplaced     String?         // Piezas reemplazadas (JSON)
+  cost              Float?          // Costo del mantenimiento
+  nextMaintenanceDate DateTime?
+  notes             String?
+
+  // Relations
+  equipment         Equipment       @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+
+  @@index([equipmentId])
+  @@index([maintenanceDate])
+  @@index([maintenanceType])
+}
+
+// ============================================
+// AUDIT LOG (Auditoría y trazabilidad)
+// ============================================
+
+model AuditLog {
+  id                String     @id @default(cuid())
+  userId            String
+  action            AuditAction
+  entityType        String     // Tipo de entidad afectada (User, Sample, Test, etc.)
+  entityId          String     // ID de la entidad afectada
+  entityName        String?    // Nombre descriptivo de la entidad
+  changes           String?    // Cambios realizados (JSON string)
+  ipAddress         String?
+  userAgent         String?
+  timestamp         DateTime   @default(now())
+
+  // Relations
+  user              User       @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([timestamp])
+}
+
+// ============================================
+// SYSTEM CONFIG (Configuración del sistema)
+// ============================================
+
+model SystemConfig {
+  id                String   @id @default(cuid())
+  key               String   @unique
+  value             String   // Puede ser JSON para configuraciones complejas
+  category          String   // GENERAL, LABORATORY, REPORTS, NOTIFICATIONS
+  description       String?
+  updatedAt         DateTime @updatedAt
+  updatedBy         String?
+
+  @@index([category])
+  @@index([key])
+}
+
+// ============================================
+// REPORT TEMPLATES (Plantillas de informes)
+// ============================================
+
+model ReportTemplate {
+  id                String   @id @default(cuid())
+  name              String
+  description       String?
+  header            String?  // HTML del encabezado
+  footer            String?  // HTML del pie de página
+  content           String   // HTML del contenido
+  logoUrl           String?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  tests             Test[]   // Pruebas que usan esta plantilla
+
+  @@index([isActive])
+}
+
+// ============================================
+// REPORTS (Informes generados)
+// ============================================
+
+model Report {
+  id                String   @id @default(cuid())
+  sampleTestId      String
+  reportNumber      String   @unique // Número único de informe
+  templateId        String?
+  generatedAt       DateTime @default(now())
+  generatedBy       String
+  status            String   @default("GENERATED") // GENERATED, PRINTED, EMAILED
+  pdfUrl            String?
+  email             String?  // Email al que se envió
+  printCount        Int      @default(0)
+
+  @@index([sampleTestId])
+  @@index([reportNumber])
+  @@index([generatedAt])
+  @@index([status])
+}

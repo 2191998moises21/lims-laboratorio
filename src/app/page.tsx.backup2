@@ -1,0 +1,347 @@
+'use client'
+
+import { useSession, signOut } from 'next-auth/react'
+import { useRouter } from 'next/navigation'
+import { useEffect } from 'react'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Loader2, LogOut, User, Shield, FlaskConical, FileText, Activity, Package, Cog, Shield as ShieldIcon } from 'lucide-react'
+
+export default function DashboardPage() {
+  const { data: session, status } = useSession()
+  const router = useRouter()
+
+  useEffect(() => {
+    if (status === 'unauthenticated') {
+      router.push('/login')
+    }
+  }, [status, router])
+
+  if (status === 'loading') {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-slate-600" />
+      </div>
+    )
+  }
+
+  if (!session) {
+    return null
+  }
+
+  const getRoleBadge = (role: string) => {
+    switch (role) {
+      case 'ADMIN':
+        return <Badge className="bg-purple-100 text-purple-700 border-purple-200">Administrador</Badge>
+      case 'BIOANALYST':
+        return <Badge className="bg-blue-100 text-blue-700 border-blue-200">Bioanalista</Badge>
+      case 'LAB_ASSISTANT':
+        return <Badge className="bg-green-100 text-green-700 border-green-200">Asistente</Badge>
+      default:
+        return <Badge>{role}</Badge>
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-50">
+      {/* Header */}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            <div className="flex items-center space-x-3">
+              <div className="h-10 w-10 rounded-full bg-gradient-to-br from-blue-600 to-cyan-600 flex items-center justify-center">
+                <FlaskConical className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-slate-900">
+                  Sistema de Gestión Laboratorial
+                </h1>
+                <p className="text-xs text-slate-500">Área de Bacteriología</p>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-3">
+                <div className="text-right">
+                  <p className="text-sm font-medium text-slate-900">{session.user.name}</p>
+                  <p className="text-xs text-slate-500">{session.user.email}</p>
+                </div>
+                <div className="h-10 w-10 rounded-full bg-slate-200 flex items-center justify-center">
+                  <User className="h-5 w-5 text-slate-600" />
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => signOut({ callbackUrl: '/login' })}
+                className="border-slate-300 hover:bg-red-50 hover:text-red-700 hover:border-red-300"
+              >
+                <LogOut className="h-4 w-4 mr-2" />
+                Cerrar Sesión
+              </Button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Welcome Section */}
+        <div className="mb-8">
+          <h2 className="text-3xl font-bold text-slate-900 mb-2">
+            Bienvenido, {session.user.name?.split(' ')[0]}!
+          </h2>
+          <p className="text-slate-600">
+            Sistema de gestión de laboratorios de bioanálisis - Área de Bacteriología
+          </p>
+        </div>
+
+        {/* User Info Card */}
+        <Card className="mb-6 border-slate-200 shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center space-x-2">
+              <Shield className="h-5 w-5 text-slate-700" />
+              <span>Información de Usuario</span>
+            </CardTitle>
+            <CardDescription>Detalles de su cuenta y permisos</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <p className="text-sm font-medium text-slate-500 mb-1">Nombre</p>
+                <p className="text-slate-900">{session.user.name}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-slate-500 mb-1">Correo Electrónico</p>
+                <p className="text-slate-900">{session.user.email}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-slate-500 mb-1">Rol</p>
+                {getRoleBadge(session.user.role)}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Quick Actions */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <Card className="border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+            <CardHeader>
+              <CardTitle className="text-lg">Registrar Nueva Muestra</CardTitle>
+              <CardDescription>Ingresar muestra al sistema</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button 
+                className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700"
+                onClick={() => router.push('/samples/new')}
+              >
+                <FlaskConical className="h-4 w-4 mr-2" />
+                Ir al Formulario
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+            <CardHeader>
+              <CardTitle className="text-lg">Panel de Control</CardTitle>
+              <CardDescription>Ver métricas y estadísticas</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button 
+                className="w-full border-slate-300"
+                onClick={() => router.push('/dashboard/executive')}
+              >
+                Ver Dashboard Ejecutivo
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+            <CardHeader>
+              <CardTitle className="text-lg">Perfil de Usuario</CardTitle>
+              <CardDescription>Configuración y datos personales</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button 
+                className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700"
+                onClick={() => router.push('/profile')}
+              >
+                <User className="h-4 w-4 mr-2" />
+                Ver Perfil
+              </Button>
+            </CardContent>
+          </Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Pruebas Pendientes</CardTitle>
+              <CardDescription>Ver pruebas en proceso</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button 
+                className="w-full border-slate-300"
+                onClick={() => router.push('/dashboard/executive')}
+              >
+                Ver Lista
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+            <CardHeader>
+              <CardTitle className="text-lg">Inventario de Reactivos</CardTitle>
+              <CardDescription>Gestión de stock y caducidad</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button 
+                className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700"
+                onClick={() => router.push('/reagents')}
+              >
+                <Package className="h-4 w-4 mr-2" />
+                Ver Inventario
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+            <CardHeader>
+              <CardTitle className="text-lg">Resultados e Informes</CardTitle>
+              <CardDescription>Generar y descargar informes PDF</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button 
+                className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700"
+                onClick={() => router.push('/results')}
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                Ver Resultados
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+            <CardHeader>
+              <CardTitle className="text-lg">Equipos e Instrumentos</CardTitle>
+              <CardDescription>Gestión de equipos y calibraciones</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button 
+                className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700"
+                onClick={() => router.push('/equipment')}
+              >
+                <Cog className="h-4 w-4 mr-2" />
+                Ver Equipos
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+            <CardHeader>
+              <CardTitle className="text-lg">Auditoría del Sistema</CardTitle>
+              <CardDescription>Registro de acciones y trazabilidad</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button 
+                className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700"
+                onClick={() => router.push('/audit')}
+              >
+                <ShieldIcon className="h-4 w-4 mr-2" />
+                Ver Auditoría
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Recent Samples */}
+        <Card className="mt-6 border-slate-200 shadow-sm">
+          <CardHeader>
+            <CardTitle>Muestras Recientes</CardTitle>
+            <CardDescription>
+              Las últimas muestras registradas en el sistema
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="text-center text-slate-500 py-8">
+              <FlaskConical className="h-8 w-8 mx-auto mb-2 text-slate-400" />
+              <p>No hay muestras recientes</p>
+              <p className="text-sm mt-2">
+                Registre una nueva muestra para comenzar
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Status Message */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+          <Card className="border-blue-200 bg-blue-50">
+            <CardContent className="pt-6">
+              <div className="flex items-start space-x-3">
+                <div className="h-6 w-6 rounded-full bg-blue-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <svg className="h-3 w-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="font-semibold text-blue-900 mb-1">Sistema Activo</h3>
+                  <p className="text-sm text-blue-700">
+                    El sistema de gestión laboratorial está funcionando correctamente. La autenticación ha sido establecida exitosamente.
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-green-200 bg-green-50 hover:shadow-md transition-shadow cursor-pointer" onClick={() => router.push('/dashboard/executive')}>
+            <CardContent className="pt-6">
+              <div className="flex items-start space-x-3">
+                <div className="h-6 w-6 rounded-full bg-green-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <Activity className="h-3 w-3 text-white" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-green-900 mb-1">Panel de Control Ejecutivo</h3>
+                  <p className="text-sm text-green-700 mb-3">
+                    Vea métricas, gráficos y estadísticas detalladas del laboratorio
+                  </p>
+                  <Button className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700">
+                    Ir al Panel Ejecutivo
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Recent Samples */}
+        <Card className="mt-6 border-blue-200 bg-blue-50">
+          <CardContent className="pt-6">
+            <div className="flex items-start space-x-3">
+              <div className="h-6 w-6 rounded-full bg-blue-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+                <svg className="h-3 w-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="font-semibold text-blue-900 mb-1">Sistema Activo</h3>
+                <p className="text-sm text-blue-700">
+                  El sistema de gestión laboratorial está funcionando correctamente. La autenticación ha sido establecida exitosamente.
+                  <br />
+                  <span className="text-xs mt-2 block text-blue-600">
+                    * Este es el panel básico de inicio. El desarrollo de módulos específicos continuará en las siguientes fases.
+                  </span>
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </main>
+
+      {/* Footer */}
+      <footer className="bg-white border-t border-slate-200 mt-auto">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <p className="text-center text-sm text-slate-500">
+            © {new Date().getFullYear()} Sistema de Gestión Laboratorial - Bacteriología. Todos los derechos reservados.
+          </p>
+        </div>
+      </footer>
+    </div>
+  )
+}
