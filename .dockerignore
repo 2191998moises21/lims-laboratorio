@@ -1,13 +1,82 @@
+# =============================================================================
+# .dockerignore - ARCHIVOS Y DIRECTORIOS A EXCLUIR DEL BUILD DE DOCKER
+# =============================================================================
+
+# Dependencias (se instalan en el build)
+node_modules
+bun.lockb
+
+# Builds de Next.js (se generan en el build)
+.next
+out
+
+# Testing y Linting
+coverage
+.nyc_output
+.nyc
+
+# Entorno y archivos de configuración local
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+
+# Git
+.git
+.gitignore
+.github
+
+# Docker
 Dockerfile
 .dockerignore
-node_modules
-npm-debug.log
-README.md
-.next
-.git
-package-lock.json
-yarn.lock
-pnpm-lock.yaml
-test
+.dockerignore.d
+docker-compose.yml
+
+# CI/CD
+.vercel
+.netlify
+
+# IDEs y Editores
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Logs y Archivos temporales
 *.log
-local-*
+*.pid
+*.seed
+*.pid.lock
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+server.log
+dev.log
+
+# Archivos del sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Documentación (opcional)
+README.md
+CHANGELOG.md
+LICENSE
+docs
+
+# Scripts de despliegue locales
+deploy
+*.sh
+
+# Archivos de caché y temporales
+.cache
+.parcel-cache
+.turbo
+
+# Otros archivos no necesarios para Docker build
+.eslintrc
+.prettierrc
+.editorconfig
