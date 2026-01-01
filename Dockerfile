@@ -30,6 +30,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
+# Instalar Bun (instalador oficial)
+RUN curl -fsSL https://bun.sh/install | bash
+
+# Agregar Bun al PATH para todas las shells
+ENV BUN_INSTALL="$HOME/.bun"
+ENV PATH="$BUN_INSTALL/bin:$PATH"
+
+# Verificar que Bun está instalado
+RUN bun --version
+
 # Establecer directorio de trabajo
 WORKDIR /app
 
@@ -55,6 +65,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
+# Instalar Bun (instalador oficial)
+RUN curl -fsSL https://bun.sh/install | bash
+
+# Agregar Bun al PATH para todas las shells
+ENV BUN_INSTALL="$HOME/.bun"
+ENV PATH="$BUN_INSTALL/bin:$PATH"
+
 # Establecer directorio de trabajo
 WORKDIR /app
 
@@ -66,7 +83,7 @@ COPY --from=deps /app/package.json ./package.json
 COPY . .
 
 # Generar cliente Prisma
-RUN npx prisma generate
+RUN bunx prisma generate
 
 # Build de Next.js para producción
 # .next/standalone: Contiene todo lo necesario para ejecutar la app
