@@ -62,16 +62,19 @@ export async function POST(
       )
     }
 
-    // Eliminar resultados existentes
-    await db.testResult.deleteMany({
-      where: { sampleTestId }
-    })
+    // Usar transacción para eliminar y crear resultados
+    const createdResultIds: string[] = []
 
-    // Crear nuevos resultados
-    const createdResults = await db.testResult.createMany({
-      data: Object.entries(results).map(([parameterId, data]: [string, any]) => {
-        const parameter = sampleTest.test.parameters.find((p: any) => p.id === parameterId)
-        
+    await db.$transaction(async (tx) => {
+      // Eliminar resultados existentes (esto también elimina attachments por cascade)
+      await tx.testResult.deleteMany({
+        where: { sampleTestId }
+      })
+
+      // Crear nuevos resultados uno por uno para obtener IDs
+      for (const [parameterId, data] of Object.entries(results) as [string, Record<string, unknown>][]) {
+        const parameter = sampleTest.test.parameters.find((p) => p.id === parameterId)
+
         if (!parameter) {
           throw new Error(`Parámetro no encontrado: ${parameterId}`)
         }
@@ -79,35 +82,42 @@ export async function POST(
         // Determinar si es anormal basado en rangos de referencia
         let isAbnormal = false
         let isCritical = false
+        const quantValue = data.quantitativeValue as number | undefined
 
-        if (parameter.resultType === 'QUANTITATIVE' && data.quantitativeValue !== undefined) {
-          if (parameter.normalMin !== null && data.quantitativeValue < parameter.normalMin) {
+        if (parameter.resultType === 'QUANTITATIVE' && quantValue !== undefined) {
+          if (parameter.normalMin !== null && quantValue < parameter.normalMin) {
             isAbnormal = true
           }
-          if (parameter.normalMax !== null && data.quantitativeValue > parameter.normalMax) {
+          if (parameter.normalMax !== null && quantValue > parameter.normalMax) {
             isAbnormal = true
           }
-          if (parameter.criticalMin !== null && data.quantitativeValue <= parameter.criticalMin) {
+          if (parameter.criticalMin !== null && quantValue <= parameter.criticalMin) {
             isCritical = true
           }
-          if (parameter.criticalMax !== null && data.quantitativeValue >= parameter.criticalMax) {
+          if (parameter.criticalMax !== null && quantValue >= parameter.criticalMax) {
             isCritical = true
           }
         }
 
-        return {
-          sampleTestId,
-          parameterId,
-          quantitativeValue: data.quantitativeValue,
-          qualitativeValue: data.qualitativeValue,
-          textValue: data.textValue,
-          unit: parameter.unit,
-          isAbnormal,
-          isCritical,
-          notes: data.notes || null
-        }
-      })
+        const result = await tx.testResult.create({
+          data: {
+            sampleTestId,
+            parameterId,
+            quantitativeValue: quantValue,
+            qualitativeValue: data.qualitativeValue as string | undefined,
+            textValue: data.textValue as string | undefined,
+            unit: parameter.unit,
+            isAbnormal,
+            isCritical,
+            notes: (data.notes as string) || null
+          }
+        })
+
+        createdResultIds.push(result.id)
+      }
     })
+
+    const createdResults = { count: createdResultIds.length }
 
     // Actualizar información general de la prueba
     await db.sampleTest.update({
@@ -121,19 +131,26 @@ export async function POST(
       }
     })
 
-    // Procesar archivos adjuntos
+    // Procesar archivos adjuntos (se asocian al primer resultado creado)
     const files = formData.getAll('files') as File[]
-    if (files && files.length > 0) {
+    if (files && files.length > 0 && createdResultIds.length > 0) {
+      const primaryResultId = createdResultIds[0]
+
       for (const file of files) {
         if (file instanceof File && file.size > 0) {
-          // En producción, guardar en storage
+          // TODO: En producción, subir archivo a Cloud Storage y obtener URL real
+          const timestamp = Date.now()
+          const safeFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
+          const fileUrl = `/uploads/results/${sampleTestId}/${timestamp}_${safeFileName}`
+
           await db.testResultAttachment.create({
             data: {
-              testResultId: '', // Se asociará después
+              testResultId: primaryResultId,
               fileName: file.name,
-              fileUrl: `/uploads/results/${sampleTestId}/${file.name}`,
+              fileUrl,
               fileType: file.type,
-              fileSize: file.size
+              fileSize: file.size,
+              description: `Archivo adjunto para prueba ${sampleTest.test.code}`
             }
           })
         }
@@ -156,7 +173,7 @@ export async function POST(
       })
     }
 
-    // Crear entrada de auditoría
+    // Crear entrada de auditoría (sin datos sensibles de resultados)
     await db.auditLog.create({
       data: {
         userId: session.user.id,
@@ -166,9 +183,10 @@ export async function POST(
         entityName: `${sampleTest.test.code}`,
         changes: JSON.stringify({
           resultsSaved: createdResults.count,
-          results: results,
-          technique,
-          resultInterpretation
+          parametersUpdated: Object.keys(results).length,
+          technique: technique || null,
+          hasInterpretation: !!resultInterpretation,
+          attachmentsAdded: files.filter(f => f instanceof File && f.size > 0).length
         })
       }
     })

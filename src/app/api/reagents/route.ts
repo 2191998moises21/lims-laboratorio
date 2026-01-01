@@ -17,41 +17,41 @@ export async function GET(request: NextRequest) {
 
     const searchParams = request.nextUrl.searchParams
     const search = searchParams.get('search') || ''
-    const type = searchParams.get('type') || ''
+    const category = searchParams.get('category') || ''
     const location = searchParams.get('location') || ''
     const status = searchParams.get('status') || ''
 
-    // Construir where clause
-    const where: any = { isActive: true }
+    // Construir where clause base
+    const where: Record<string, unknown> = { isActive: true }
 
     if (search) {
       where.OR = [
-        { name: { contains: search } },
-        { code: { contains: search } },
-        { type: { contains: search } }
+        { name: { contains: search, mode: 'insensitive' } },
+        { lotNumber: { contains: search, mode: 'insensitive' } },
+        { manufacturer: { contains: search, mode: 'insensitive' } }
       ]
     }
 
-    if (type) {
-      where.type = type
+    if (category) {
+      where.category = category
     }
 
     if (location) {
-      where.location = { contains: location }
+      where.storageLocation = { contains: location, mode: 'insensitive' }
     }
 
-    if (status === 'low_stock') {
-      where.currentStock = {
-        lte: db.reagent.fields.minStockLevel
-      }
-    } else if (status === 'expiring_soon') {
-      where.expirationDate = {
-        lte: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-        gt: new Date()
+    // Filtros de fecha para status específicos
+    const now = new Date()
+    const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
+
+    if (status === 'expiring_soon') {
+      where.expiryDate = {
+        lte: sevenDaysFromNow,
+        gt: now
       }
     } else if (status === 'expired') {
-      where.expirationDate = {
-        lt: new Date()
+      where.expiryDate = {
+        lt: now
       }
     }
 
@@ -65,8 +65,8 @@ export async function GET(request: NextRequest) {
           }
         },
         transactions: {
-          take: 1,
-          orderBy: { createdAt: 'desc' }
+          orderBy: { transactionDate: 'desc' },
+          take: 5
         }
       },
       orderBy: {
@@ -74,28 +74,36 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    // Calcular stock actual
+    // Procesar reactivos y calcular stock actual
     const reagentsWithStock = reagents.map(reagent => {
-      const currentStock = reagent.transactions?.reduce((sum: number, t: any) => {
-        if (t.type === 'IN') {
-          return sum + t.quantity
-        } else {
-          return sum - t.quantity
-        }
-      }, 0) || 0
+      // El stock actual es el campo quantity del reactivo
+      // Las transacciones son para historial
+      const currentStock = reagent.quantity
+      const isLowStock = currentStock <= reagent.minStockLevel
+      const isExpired = reagent.expiryDate < now
+      const isExpiringSoon = !isExpired && reagent.expiryDate <= sevenDaysFromNow
 
-      const transactionCount = reagent.transactions?.length || 0
-      const lastTransactionDate = reagent.transactions?.[0]?.createdAt || null
+      const transactionCount = reagent._count.transactions
+      const lastTransaction = reagent.transactions[0] || null
 
       return {
         ...reagent,
         currentStock,
+        isLowStock,
+        isExpired,
+        isExpiringSoon,
         transactionCount,
-        lastTransactionDate
+        lastTransactionDate: lastTransaction?.transactionDate || null
       }
     })
 
-    return NextResponse.json(reagentsWithStock)
+    // Filtrar por low_stock en memoria (ya que requiere comparación de campos)
+    let filteredReagents = reagentsWithStock
+    if (status === 'low_stock') {
+      filteredReagents = reagentsWithStock.filter(r => r.isLowStock)
+    }
+
+    return NextResponse.json(filteredReagents)
   } catch (error) {
     console.error('Error fetching reagents:', error)
     return NextResponse.json(
