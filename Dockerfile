@@ -1,153 +1,107 @@
 # =============================================================================
 # DOCKERFILE PARA SISTEMA DE GESTIÓN LABORATORIAL (NEXT.JS 16)
 # =============================================================================
-# Compatibilidad: Google Cloud Build, Google App Engine, Google Cloud Run
-# Runtime: Node.js 20 (Slim - Debian-based)
-# Base: Debian Bookworm (stable, con libvips disponible)
+# Optimizado para: Google Cloud Run (serverless, pay-per-use)
+# Runtime: Node.js 20 Alpine (ligero, ~170MB vs ~340MB slim)
+# Objetivo: Reducir costos de GCP (~80% menos que App Engine)
 # =============================================================================
 
 # -------------------------------------------------------------------------
-# ETAPA 1: IMAGEN BASE (DEPENDENCIAS)
+# ETAPA 1: DEPENDENCIAS (deps)
 # -------------------------------------------------------------------------
-FROM node:20-slim AS deps
+FROM node:20-alpine AS deps
 
-# Instalar dependencias necesarias para Sharp (procesamiento de imágenes)
-# libvips-dev: Librerías de desarrollo para Sharp
-# libvips: Librerías runtime para Sharp
-# libglib2.0-dev: Dependencia para libvips
-# libglib2.0-0: Dependencia runtime para libvips
-# build-essential: Compiladores y herramientas (gcc, make)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libvips-dev \
-    libvips \
-    libglib2.0-dev \
-    libglib2.0-0 \
-    libexpat1-dev \
-    libexpat1 \
-    build-essential \
+# Instalar dependencias del sistema para compilación
+# - vips-dev: Para Sharp (procesamiento de imágenes)
+# - python3, make, g++: Para compilar módulos nativos
+RUN apk add --no-cache \
+    libc6-compat \
+    vips-dev \
     python3 \
     make \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
+    g++
 
-# Instalar Bun (instalador oficial)
-RUN curl -fsSL https://bun.sh/install | bash
+# Instalar Bun
+RUN apk add --no-cache curl bash && \
+    curl -fsSL https://bun.sh/install | bash
 
-# Agregar Bun al PATH para todas las shells
-ENV BUN_INSTALL="$HOME/.bun"
+ENV BUN_INSTALL="/root/.bun"
 ENV PATH="$BUN_INSTALL/bin:$PATH"
 
-# Verificar que Bun está instalado
-RUN bun --version
-
-# Establecer directorio de trabajo
 WORKDIR /app
 
-# Copiar solo archivos de gestión de paquetes (no código fuente)
-# Esto aprovecha el cache de Docker para builds repetitivos
-# NOTA: El archivo se llama "bun.lock" (sin extensión)
-COPY package.json ./
-COPY bun.lock* ./
+# Copiar archivos de dependencias
+COPY package.json bun.lock* ./
 
 # Instalar dependencias de producción
-# NOTA: Usamos bun install porque el proyecto usa Bun
 RUN bun install --frozen-lockfile --production
 
 # -------------------------------------------------------------------------
-# ETAPA 2: BUILD DE LA APLICACIÓN (NEXT.JS)
+# ETAPA 2: BUILD (builder)
 # -------------------------------------------------------------------------
-FROM node:20-slim AS builder
+FROM node:20-alpine AS builder
 
-# Instalar dependencias necesarias para el build
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Dependencias para build
+RUN apk add --no-cache \
+    libc6-compat \
     python3 \
     make \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
+    g++
 
-# Instalar Bun (instalador oficial)
-RUN curl -fsSL https://bun.sh/install | bash
+# Instalar Bun
+RUN apk add --no-cache curl bash && \
+    curl -fsSL https://bun.sh/install | bash
 
-# Agregar Bun al PATH para todas las shells
-ENV BUN_INSTALL="$HOME/.bun"
+ENV BUN_INSTALL="/root/.bun"
 ENV PATH="$BUN_INSTALL/bin:$PATH"
 
-# Establecer directorio de trabajo
 WORKDIR /app
 
-# Copiar dependencias instaladas desde la etapa deps
+# Copiar dependencias y código
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/package.json ./package.json
-
-# Copiar código fuente del proyecto
 COPY . .
 
-# Generar cliente Prisma
+# Generar cliente Prisma y build
 RUN bunx prisma generate
-
-# Build de Next.js para producción
-# .next/standalone: Contiene todo lo necesario para ejecutar la app
 RUN bun run build
 
 # -------------------------------------------------------------------------
-# ETAPA 3: IMAGEN FINAL (RUNTIME)
+# ETAPA 3: RUNTIME (runner) - Imagen final mínima
 # -------------------------------------------------------------------------
-FROM node:20-slim AS runner
+FROM node:20-alpine AS runner
 
-# Instalar dependencias de runtime necesarias para Sharp
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libvips \
-    libglib2.0-0 \
-    libexpat1 \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# Solo dependencias de runtime (sin herramientas de compilación)
+RUN apk add --no-cache \
+    libc6-compat \
+    vips \
+    curl
 
-# Establecer directorio de trabajo
 WORKDIR /app
 
-# Copiar package.json (solo para referencias, no para instalar)
-COPY package.json ./
+# Crear usuario no-root (seguridad)
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nodejs
 
-# Crear usuario no root por seguridad (mejor práctica)
-RUN groupadd -r 1001 -S nodejs && \
-    useradd -r -u 1001 -G nodejs -s /bin/sh nodejs
-
-# Copiar build desde la etapa builder
-# .next/standalone: Contiene servidor y assets
-# .next/static: Contiene archivos estáticos optimizados
-COPY --from=builder --chown=nodejs:nodejs /app/.next/standalone ./.next/standalone
+# Copiar solo lo necesario para producción
+COPY --from=builder --chown=nodejs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nodejs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nodejs:nodejs /app/public ./public
-
-# Copiar cliente Prisma desde la etapa deps
-COPY --from=deps --chown=nodejs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=nodejs:nodejs /app/prisma ./prisma
 
-# -------------------------------------------------------------------------
-# CONFIGURACIÓN DE ENTORNO Y PUERTOS
-# -------------------------------------------------------------------------
-
-# Puerto que escucha la aplicación (Next.js default)
-ENV PORT=3000
-EXPOSE 3000
-
-# Configuración de Node.js para producción
+# Configuración de entorno
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=8080
+ENV HOSTNAME="0.0.0.0"
 
-# -------------------------------------------------------------------------
-# HEALTH CHECK (VERIFICACIÓN DE SALUD)
-# -------------------------------------------------------------------------
-# Google App Engine/Cloud Run necesita verificar que el app esté saludable
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:3000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)}).on('error', () => process.exit(1))"
+EXPOSE 8080
 
-# -------------------------------------------------------------------------
-# ARRANCAR LA APLICACIÓN
-# -------------------------------------------------------------------------
-# Cambiar a usuario no root por seguridad
+# Health check para Cloud Run
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8080/api/health || exit 1
+
+# Ejecutar como usuario no-root
 USER nodejs
 
-# Arrancar servidor Node.js (standalone build)
-# server.js: El servidor generado por Next.js standalone
-CMD ["node", ".next/standalone/server.js"]
+# Iniciar servidor (Cloud Run usa puerto 8080)
+CMD ["node", "server.js"]
