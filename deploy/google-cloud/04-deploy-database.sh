@@ -3,334 +3,272 @@
 # =============================================================================
 # SCRIPT 4: DESPLIEGUE DE BASE DE DATOS EN GOOGLE CLOUD SQL
 # =============================================================================
+# Optimizado para costos mínimos:
+# - Sin VPC personalizada (ahorro ~$15/mes)
+# - Cloud SQL Auth Proxy para conexiones seguras
+# - Tier mínimo db-f1-micro (~$10/mes)
+# - Storage reducido a 10GB (~$2/mes)
+# - Sin alta disponibilidad (zonal, no regional)
+# =============================================================================
 
 set -e
 
-# Cargar funciones comunes
-source "$(dirname "$0")/common.sh"
+# Colores
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
 
-# Configuración por defecto
-PROJECT_ID="laboratorio-lims-$(date +%s)"
-REGION="us-central1"
-ZONE="us-central1-a"
-DB_NAME="lims-database"
+log() { echo -e "${BLUE}[INFO]${NC} $1"; }
+log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
+log_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+# Configuración optimizada para costos
+PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}"
+REGION="${REGION:-us-central1}"
+INSTANCE_NAME="${INSTANCE_NAME:-lims-db}"
+DB_NAME="${DB_NAME:-lims}"
+DB_USER="${DB_USER:-lims_user}"
 DB_VERSION="POSTGRES_15"
-TIER="db-f1-micro"
-STORAGE="100"
-CONNECTOR_NAME="lims-connector"
-NETWORK_NAME="lims-vpc"
+TIER="${TIER:-db-f1-micro}"
+STORAGE="${STORAGE:-10}"
 
 # Verificar dependencias
 check_dependencies() {
     log "Verificando dependencias..."
-    
+
     if ! command -v gcloud &> /dev/null; then
         log_error "Google Cloud CLI no está instalado"
-        log_info "Instalar con: curl https://sdk.cloud.google.com | bash"
         exit 1
     fi
-    
+
     log_success "Dependencias verificadas"
 }
 
-# Verificar que el proyecto existe
-check_project() {
-    log "Verificando proyecto..."
-    
-    if ! gcloud projects describe $PROJECT_ID &> /dev/null; then
-        log_error "El proyecto $PROJECT_ID no existe"
-        log_info "Ejecutar primero: ./01-setup-gcp.sh"
-        exit 1
-    fi
-    
-    log_success "Proyecto verificado: $PROJECT_ID"
-}
+# Habilitar APIs necesarias
+enable_apis() {
+    log "Habilitando APIs necesarias..."
 
-# Crear red VPC personalizada
-create_vpc_network() {
-    log "Creando red VPC personalizada..."
-    
-    gcloud compute networks create $NETWORK_NAME \
+    gcloud services enable \
+        sqladmin.googleapis.com \
+        sql-component.googleapis.com \
         --project=$PROJECT_ID \
-        --subnet-mode=custom
-    
-    log_success "Red VPC creada: $NETWORK_NAME"
+        --quiet
+
+    log_success "APIs habilitadas"
 }
 
-# Crear subred en la VPC
-create_subnet() {
-    log "Creando subred en VPC..."
-    
-    gcloud compute networks subnets create lims-subnet \
-        --project=$PROJECT_ID \
-        --network=$NETWORK_NAME \
-        --range=10.148.0.0/24 \
-        --region=$REGION
-    
-    log_success "Subred creada: 10.148.0.0/24"
-}
-
-# Crear instancia de base de datos
+# Crear instancia de Cloud SQL (SIMPLIFICADA - sin VPC)
 create_cloudsql_instance() {
-    log "Creando instancia de Google Cloud SQL..."
-    
-    gcloud sql instances create $DB_NAME \
+    log "Creando instancia de Cloud SQL (configuración económica)..."
+
+    # Verificar si ya existe
+    if gcloud sql instances describe $INSTANCE_NAME --project=$PROJECT_ID &>/dev/null; then
+        log_warning "La instancia $INSTANCE_NAME ya existe"
+        return 0
+    fi
+
+    # Generar contraseña segura
+    ROOT_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/")
+    USER_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/")
+
+    # Guardar credenciales en archivo temporal seguro
+    CREDS_FILE="/tmp/lims-db-credentials-$(date +%s).txt"
+    cat > $CREDS_FILE << EOF
+# CREDENCIALES DE BASE DE DATOS LIMS
+# Generadas: $(date)
+# GUARDAR EN LUGAR SEGURO Y ELIMINAR ESTE ARCHIVO
+
+PROJECT_ID=$PROJECT_ID
+INSTANCE_NAME=$INSTANCE_NAME
+REGION=$REGION
+DB_NAME=$DB_NAME
+DB_USER=$DB_USER
+DB_PASSWORD=$USER_PASSWORD
+ROOT_PASSWORD=$ROOT_PASSWORD
+
+# String de conexión para Prisma (actualizar HOST después del deploy)
+DATABASE_URL="postgresql://$DB_USER:$USER_PASSWORD@HOST:5432/$DB_NAME?sslmode=require"
+EOF
+
+    chmod 600 $CREDS_FILE
+    log "Credenciales guardadas en: $CREDS_FILE"
+
+    # Crear instancia con configuración mínima
+    gcloud sql instances create $INSTANCE_NAME \
         --project=$PROJECT_ID \
-        --tier=$TIER \
         --database-version=$DB_VERSION \
+        --tier=$TIER \
         --region=$REGION \
-        --storage=$STORAGE \
-        --network=$NETWORK_NAME \
-        --availability-type=regional \
-        --root-password=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16) \
-        --backup \
-        --enable-bin-log \
-        --bin-log-retention=7 \
-        --maintenance-window-day=1 \
-        --maintenance-window-hour=3 \
-        --deletion-policy=on \
-        --retained-backups=7
-    
-    # Esperar que la instancia esté lista
-    log "Esperando que la instancia esté lista (esto puede tardar unos minutos)..."
-    gcloud sql instances wait $DB_NAME --project=$PROJECT_ID --timeout=600
-    
-    log_success "Instancia creada: $DB_NAME"
+        --storage-size=$STORAGE \
+        --storage-type=HDD \
+        --storage-auto-increase \
+        --availability-type=zonal \
+        --backup-start-time=03:00 \
+        --maintenance-window-day=SUN \
+        --maintenance-window-hour=03 \
+        --root-password=$ROOT_PASSWORD \
+        --database-flags=max_connections=25 \
+        --quiet
+
+    log "Esperando que la instancia esté lista..."
+    sleep 30
+
+    log_success "Instancia creada: $INSTANCE_NAME"
 }
 
 # Crear usuario de base de datos
 create_db_user() {
     log "Creando usuario de base de datos..."
-    
-    gcloud sql users create lims-user \
-        --instance=$DB_NAME \
+
+    # Leer contraseña del archivo de credenciales
+    if [ -f "$CREDS_FILE" ]; then
+        USER_PASSWORD=$(grep "DB_PASSWORD=" $CREDS_FILE | cut -d= -f2)
+    else
+        USER_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/")
+    fi
+
+    gcloud sql users create $DB_USER \
+        --instance=$INSTANCE_NAME \
         --project=$PROJECT_ID \
-        --password=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16)
-    
-    log_success "Usuario de DB creado: lims-user"
+        --password=$USER_PASSWORD \
+        --quiet || log_warning "Usuario ya existe o error al crear"
+
+    log_success "Usuario creado: $DB_USER"
 }
 
 # Crear base de datos
 create_database() {
     log "Creando base de datos..."
-    
-    gcloud sql databases create lims \
-        --instance=$DB_NAME \
-        --project=$PROJECT_ID
-    
-    log_success "Base de datos creada: lims"
-}
 
-# Crear conector de base de datos
-create_connector() {
-    log "Creando conector de base de datos..."
-    
-    gcloud sql connectors create $CONNECTOR_NAME \
-        --instance=$DB_NAME \
+    gcloud sql databases create $DB_NAME \
+        --instance=$INSTANCE_NAME \
         --project=$PROJECT_ID \
-        --region=$REGION \
-        --network=$NETWORK_NAME \
-        --subnet=lims-subnet
-    
-    log_success "Conector creado: $CONNECTOR_NAME"
+        --quiet || log_warning "Base de datos ya existe o error al crear"
+
+    log_success "Base de datos creada: $DB_NAME"
 }
 
-# Configurar reglas de firewall
-configure_firewall() {
-    log "Configurando reglas de firewall..."
-    
-    gcloud compute firewall-rules create lims-allow-ingress \
-        --project=$PROJECT_ID \
-        --network=$NETWORK_NAME \
-        --allow=tcp:5432 \
-        --source-ranges=0.0.0.0/0 \
-        --target-tags=cloud-sql
-    
-    gcloud compute firewall-rules create lims-allow-egress \
-        --project=$PROJECT_ID \
-        --network=$NETWORK_NAME \
-        --allow=tcp:443 \
-        --destination-ranges=0.0.0.0/0
-    
-    log_success "Reglas de firewall configuradas"
-}
+# Configurar conexión para Cloud Run
+configure_cloudrun_connection() {
+    log "Configurando conexión para Cloud Run..."
 
-# Ejecutar migraciones de Prisma
-run_prisma_migrations() {
-    log "Ejecutando migraciones de Prisma..."
-    
-    # Obtener IP de la instancia
-    DB_IP=$(gcloud sql instances describe $DB_NAME --project=$PROJECT_ID --format="value(ipAddresses[0].ipAddress)")
-    
-    if [ -z "$DB_IP" ]; then
-        log_warning "No se pudo obtener IP de la instancia de base de datos"
-        log_info "La IP se asignará dinámicamente"
-    fi
-    
-    # Configurar DATABASE_URL para producción
-    if [ -n "$DB_IP" ]; then
-        export DATABASE_URL="postgresql://lims-user:$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16)@${DB_IP}:5432/lims?sslmode=require"
-        log_info "DATABASE_URL configurada"
-    fi
-    
-    # Generar cliente Prisma
-    log "Generando cliente Prisma..."
-    bun run db:generate
-    
-    # Ejecutar migraciones
-    log "Aplicando migraciones..."
-    bun run db:push
-    
-    log_success "Migraciones aplicadas"
-}
+    # Obtener la cuenta de servicio de Cloud Run
+    PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)")
+    CLOUDRUN_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
 
-# Configurar proxy para desarrollo local
-setup_local_proxy() {
-    log "Configurando proxy para desarrollo local..."
-    
-    # Crear regla de autorización de IPs
-    gcloud sql instances patch $DB_NAME \
-        --project=$PROJECT_ID \
-        --authorized-networks=0.0.0.0/0
-    
-    log_warning "⚠️ IMPORTANTE: Esto permite acceso desde cualquier IP (solo para desarrollo)"
-    log_warning "Para producción, usar conector de VPC y reglas de firewall específicas"
-}
+    # Dar permisos de Cloud SQL Client a Cloud Run
+    gcloud projects add-iam-policy-binding $PROJECT_ID \
+        --member="serviceAccount:$CLOUDRUN_SA" \
+        --role="roles/cloudsql.client" \
+        --quiet
 
-# Obtener información de conexión
-get_connection_info() {
-    log "Información de conexión de base de datos:"
-    
+    log_success "Permisos configurados para Cloud Run"
+
     # Obtener nombre de conexión
-    CONNECTION_NAME=$(gcloud sql instances describe $DB_NAME --project=$PROJECT_ID --format="value(connectionName)")
-    
-    # Obtener IP (si existe)
-    DB_IP=$(gcloud sql instances describe $DB_NAME --project=$PROJECT_ID --format="value(ipAddresses[0].ipAddress)")
-    
+    CONNECTION_NAME=$(gcloud sql instances describe $INSTANCE_NAME \
+        --project=$PROJECT_ID \
+        --format="value(connectionName)")
+
+    log "Connection Name: $CONNECTION_NAME"
+    log "Usar --add-cloudsql-instances=$CONNECTION_NAME al desplegar Cloud Run"
+}
+
+# Mostrar información de conexión
+show_connection_info() {
     echo ""
-    echo "============================================"
-    echo "INFORMACIÓN DE CONEXIÓN"
-    echo "============================================"
+    log "=========================================="
+    log "📊 INFORMACIÓN DE CONEXIÓN"
+    log "=========================================="
     echo ""
+
+    CONNECTION_NAME=$(gcloud sql instances describe $INSTANCE_NAME \
+        --project=$PROJECT_ID \
+        --format="value(connectionName)" 2>/dev/null || echo "N/A")
+
     echo "Proyecto: $PROJECT_ID"
-    echo "Instancia: $DB_NAME"
-    echo "Versión: PostgreSQL 15"
+    echo "Instancia: $INSTANCE_NAME"
     echo "Región: $REGION"
-    echo "Network: $NETWORK_NAME"
-    echo "Subnet: 10.148.0.0/24"
+    echo "Base de datos: $DB_NAME"
+    echo "Usuario: $DB_USER"
     echo ""
-    
-    if [ -n "$CONNECTION_NAME" ]; then
-        echo "Nombre de Conexión: $CONNECTION_NAME"
+    echo "Connection Name: $CONNECTION_NAME"
+    echo ""
+
+    if [ -f "$CREDS_FILE" ]; then
+        echo "📁 Credenciales guardadas en: $CREDS_FILE"
+        echo ""
     fi
-    
-    if [ -n "$DB_IP" ]; then
-        echo "IP Externa: $DB_IP (solo disponible si se habilita IP pública)"
-    fi
-    
+
+    echo "Para Cloud Run, usar:"
+    echo "  --add-cloudsql-instances=$CONNECTION_NAME"
+    echo "  --set-env-vars DATABASE_URL=postgresql://$DB_USER:PASSWORD@/cloudsql/$CONNECTION_NAME/$DB_NAME"
     echo ""
-    echo "============================================"
-    echo "STRING DE CONEXIÓN PRISMA"
-    echo "============================================"
+}
+
+# Mostrar información de costos
+show_cost_info() {
     echo ""
-    
-    # Generar string de conexión
-    if [ -n "$DB_IP" ]; then
-        echo "postgresql://lims-user:PASSWORD@${DB_IP}:5432/lims?sslmode=require"
-    else
-        echo "Usar conector de VPC o Proxy SQL"
-    fi
-    
+    log "=========================================="
+    log "💰 ESTIMACIÓN DE COSTOS"
+    log "=========================================="
     echo ""
-    echo "Para conectar localmente:"
-    echo "1. gcloud sql connect $DB_NAME --project=$PROJECT_ID"
-    echo "2. gcloud sql connect $DB_NAME --project=$PROJECT_ID --user=lims-user"
+    echo "Cloud SQL (db-f1-micro):"
+    echo "  • Instancia: ~\$7.67/mes (shared vCPU, 0.6GB RAM)"
+    echo "  • Storage HDD 10GB: ~\$1.70/mes"
+    echo "  • Backups: ~\$0.80/mes"
+    echo "  • Total: ~\$10-12/mes"
     echo ""
-    
-    echo "============================================"
-    echo "COMANDOS ÚTILES"
-    echo "============================================"
+    echo "Comparación con configuración anterior:"
+    echo "  • Con VPC + Regional + 100GB: ~\$45/mes"
+    echo "  • Esta configuración: ~\$10-12/mes"
+    echo "  • Ahorro: ~\$33/mes (73%)"
     echo ""
-    echo "Ver estado de la instancia:"
-    echo "  gcloud sql instances describe $DB_NAME --project=$PROJECT_ID"
-    echo ""
-    echo "Ver logs:"
-    echo "  gcloud sql instances logs tail $DB_NAME --project=$PROJECT_ID"
-    echo ""
-    echo "Escalar instancia:"
-    echo "  gcloud sql instances patch $DB_NAME --tier=db-f1-micro --project=$PROJECT_ID"
-    echo ""
-    echo "Realizar backup:"
-    echo "  gcloud sql backups create --instance=$DB_NAME --project=$PROJECT_ID"
-    echo ""
-    echo "Verificar estado:"
-    echo "  gcloud sql instances describe $DB_NAME --project=$PROJECT_ID --format='state,ipAddresses[0].ipAddress'"
+    echo "Para escalar después:"
+    echo "  gcloud sql instances patch $INSTANCE_NAME --tier=db-g1-small"
     echo ""
 }
 
 # Función principal
 main() {
-    log "============================================"
-    log "DESPLIEGUE DE BASE DE DATOS EN GOOGLE CLOUD SQL"
-    log "============================================"
-    
     echo ""
-    log_info "Configuración:"
+    log "=========================================="
+    log "🗄️ DESPLIEGUE DE CLOUD SQL (OPTIMIZADO)"
+    log "=========================================="
+    echo ""
+
+    log "Configuración:"
     echo "  Proyecto: $PROJECT_ID"
+    echo "  Instancia: $INSTANCE_NAME"
     echo "  Región: $REGION"
-    echo "  Base de Datos: $DB_NAME"
-    echo "  Versión: PostgreSQL 15"
-    echo "  Tier: $TIER"
-    echo "  Storage: $STORAGE GB"
-    echo "  Network: $NETWORK_NAME"
+    echo "  Tier: $TIER (económico)"
+    echo "  Storage: ${STORAGE}GB HDD"
+    echo "  Alta disponibilidad: No (zonal)"
     echo ""
-    
-    # Verificar dependencias
+
     check_dependencies
-    
-    # Verificar proyecto
-    check_project
-    
-    # Crear red VPC (para producción)
-    create_vpc_network
-    
-    # Crear subred
-    create_subnet
-    
-    # Crear instancia
+    enable_apis
     create_cloudsql_instance
-    
-    # Crear usuario
     create_db_user
-    
-    # Crear base de datos
     create_database
-    
-    # Crear conector
-    create_connector
-    
-    # Configurar firewall
-    configure_firewall
-    
-    # Ejecutar migraciones
-    run_prisma_migrations
-    
-    # Obtener información de conexión
-    get_connection_info
-    
+    configure_cloudrun_connection
+
     echo ""
-    log_success "============================================"
-    log_success "BASE DE DATOS DESPLEGADA EXITOSAMENTE"
-    log_success "============================================"
+    log "=========================================="
+    log_success "✅ BASE DE DATOS DESPLEGADA"
+    log "=========================================="
+
+    show_connection_info
+    show_cost_info
+
     echo ""
     log_warning "⚠️ IMPORTANTE:"
-    log_warning "1. Guardar las credenciales de la base de datos en un lugar seguro"
-    log_warning "2. Actualizar el archivo .env.production con DATABASE_URL"
-    log_warning "3. Para conectar localmente, usar gcloud sql connect"
-    log_warning "4. Para producción, deshabilitar acceso desde cualquier IP"
+    echo "1. Guardar las credenciales de $CREDS_FILE en lugar seguro"
+    echo "2. Eliminar el archivo de credenciales después de guardarlas"
+    echo "3. Actualizar DATABASE_URL en el despliegue de Cloud Run"
     echo ""
-    log_info "Siguiente paso: Ejecutar ./04-deploy-storage.sh"
 }
 
-# Ejecutar función principal
 main "$@"
