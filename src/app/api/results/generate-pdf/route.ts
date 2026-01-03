@@ -47,11 +47,7 @@ export async function POST(request: NextRequest) {
             parameters: true
           }
         },
-        results: {
-          include: {
-            parameter: true
-          }
-        },
+        results: true,
         validatedBy: true
       }
     })
@@ -93,19 +89,25 @@ export async function POST(request: NextRequest) {
         collectionMethod: sampleTest.sample.collectionMethod,
         priority: sampleTest.sample.priority
       },
-      testResults: sampleTest.results.map((result: any) => ({
-        testName: sampleTest.test.name,
-        testCode: sampleTest.test.code,
-        parameterName: result.parameter.name,
-        parameterCode: result.parameter.code,
-        resultType: result.parameter.resultType,
-        resultValue: formatResultValue(result),
-        unit: result.unit || result.parameter.unit,
-        referenceRange: result.parameter.referenceRange || '',
-        isAbnormal: result.isAbnormal,
-        isCritical: result.isCritical,
-        notes: result.notes || ''
-      })),
+      testResults: sampleTest.results.map((result: any) => {
+        // Look up the parameter from test.parameters using parameterId
+        const parameter = sampleTest.test.parameters.find(
+          (p: any) => p.id === result.parameterId
+        )
+        return {
+          testName: sampleTest.test.name,
+          testCode: sampleTest.test.code,
+          parameterName: parameter?.name || 'Parámetro',
+          parameterCode: parameter?.code || '',
+          resultType: parameter?.resultType || 'TEXT',
+          resultValue: formatResultValue(result),
+          unit: result.unit || parameter?.unit || '',
+          referenceRange: parameter ? `${parameter.normalMin || ''} - ${parameter.normalMax || ''}` : '',
+          isAbnormal: result.isAbnormal,
+          isCritical: result.isCritical,
+          notes: result.notes || ''
+        }
+      }),
       technique: sampleTest.technique || null,
       interpretation: sampleTest.resultInterpretation || null,
       validationInfo: {
