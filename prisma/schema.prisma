@@ -197,6 +197,8 @@ model Sample {
   createdBy         User              @relation("CreatedBy", fields: [createdById], references: [id])
   documents         SampleDocument[]
   sampleTests       SampleTest[]
+  custodyEvents     SampleCustody[]
+  rejections        SampleRejection[]
 
   @@index([sampleCode])
   @@index([patientId])
@@ -307,6 +309,7 @@ model SampleTest {
   assignedTo        User?      @relation("AssignedTo", fields: [assignedToId], references: [id])
   results           TestResult[]
   validatedBy       User?      @relation("ValidatedSampleTest", fields: [validatedById], references: [id])
+  cultureResults    CultureResult[]
 
   @@unique([sampleId, testId])
   @@index([sampleId])
@@ -389,6 +392,7 @@ model Reagent {
 
   // Relations
   transactions      ReagentTransaction[]
+  usageRecords      ReagentUsage[]
 
   @@unique([name, lotNumber])
   @@index([expiryDate])
@@ -576,4 +580,340 @@ model Report {
   @@index([reportNumber])
   @@index([generatedAt])
   @@index([status])
+}
+
+// ============================================
+// ANTIBIOTICS CATALOG (Catálogo de Antibióticos)
+// ============================================
+
+model Antibiotic {
+  id                String   @id @default(cuid())
+  name              String   // Nombre genérico (Ampicilina, Ciprofloxacina)
+  code              String   @unique // Código estándar (AMP, CIP)
+  group             String   // Grupo: Penicilinas, Quinolonas, Aminoglucósidos
+  concentration     String?  // Concentración del disco (ej: "10 µg")
+  diskCode          String?  // Código del disco comercial
+  clsiBreakpoints   String?  // JSON: { "S": "<=8", "I": "16", "R": ">=32" }
+  eucastBreakpoints String?  // JSON: Breakpoints EUCAST
+  isActive          Boolean  @default(true)
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  antibiogramResults AntibiogramResult[]
+
+  @@index([group])
+  @@index([isActive])
+}
+
+// ============================================
+// ORGANISMS (Microorganismos identificados)
+// ============================================
+
+model Organism {
+  id                String   @id @default(cuid())
+  name              String   // Nombre científico (Escherichia coli)
+  commonName        String?  // Nombre común (E. coli)
+  genus             String   // Género (Escherichia)
+  species           String   // Especie (coli)
+  gramStain         String?  // POSITIVE, NEGATIVE, VARIABLE
+  morphology        String?  // Cocos, Bacilos, Cocobacilos
+  oxygen            String?  // AEROBIC, ANAEROBIC, FACULTATIVE
+  clinicalRelevance String?  // Alta, Media, Baja
+  resistanceProfile String?  // JSON: Resistencias intrínsecas conocidas
+  isActive          Boolean  @default(true)
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  cultureResults    CultureResult[]
+
+  @@unique([genus, species])
+  @@index([gramStain])
+  @@index([isActive])
+}
+
+// ============================================
+// CULTURE RESULTS (Resultados de Cultivo)
+// ============================================
+
+model CultureResult {
+  id                String   @id @default(cuid())
+  sampleTestId      String
+  organismId        String?
+  isolateNumber     Int      @default(1) // Número de aislado (1, 2, 3...)
+  colonyCount       String?  // UFC/mL o descripción (escaso, moderado, abundante)
+  cultureMedia      String?  // Medio de cultivo utilizado
+  incubationTemp    Float?   // Temperatura de incubación
+  incubationHours   Int?     // Horas de incubación
+  morphologyNotes   String?  // Notas de morfología colonial
+  gramStainResult   String?  // Resultado de tinción Gram observado
+  biochemicalTests  String?  // JSON: Resultados de pruebas bioquímicas
+  identificationMethod String? // Manual, Automatizado, MALDI-TOF
+  confidenceLevel   Float?   // Nivel de confianza de identificación (%)
+  isFinalResult     Boolean  @default(false)
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  sampleTest        SampleTest @relation(fields: [sampleTestId], references: [id], onDelete: Cascade)
+  organism          Organism?  @relation(fields: [organismId], references: [id])
+  antibiogramResults AntibiogramResult[]
+
+  @@index([sampleTestId])
+  @@index([organismId])
+}
+
+// ============================================
+// ANTIBIOGRAM RESULTS (Antibiograma)
+// ============================================
+
+enum SensitivityResult {
+  SUSCEPTIBLE       // S - Sensible
+  INTERMEDIATE      // I - Intermedio
+  RESISTANT         // R - Resistente
+  NOT_TESTED        // NT - No probado
+  SUSCEPTIBLE_DI    // SDD - Sensible dependiente de dosis
+}
+
+model AntibiogramResult {
+  id                String             @id @default(cuid())
+  cultureResultId   String
+  antibioticId      String
+  sensitivity       SensitivityResult  // S, I, R, NT
+  zoneDiameter      Float?             // Diámetro de halo en mm (Kirby-Bauer)
+  mic               Float?             // MIC en µg/mL
+  micMethod         String?            // E-test, Microdilución, Automatizado
+  interpretationStandard String?       // CLSI, EUCAST
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  cultureResult     CultureResult @relation(fields: [cultureResultId], references: [id], onDelete: Cascade)
+  antibiotic        Antibiotic    @relation(fields: [antibioticId], references: [id])
+
+  @@unique([cultureResultId, antibioticId])
+  @@index([cultureResultId])
+  @@index([antibioticId])
+  @@index([sensitivity])
+}
+
+// ============================================
+// QUALITY CONTROL - QC LOTS (Lotes de Control)
+// ============================================
+
+model QCLot {
+  id                String   @id @default(cuid())
+  name              String   // Nombre del control (Control Normal, Control Patológico)
+  lotNumber         String   @unique
+  manufacturer      String
+  testId            String   // Prueba a la que aplica
+  parameterId       String?  // Parámetro específico (opcional)
+  expectedValue     Float    // Valor esperado (media)
+  standardDeviation Float    // Desviación estándar
+  acceptableMin     Float    // Límite inferior aceptable (media - 2SD)
+  acceptableMax     Float    // Límite superior aceptable (media + 2SD)
+  unit              String?
+  expiryDate        DateTime
+  receivedDate      DateTime @default(now())
+  openedDate        DateTime?
+  isActive          Boolean  @default(true)
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  results           QCResult[]
+
+  @@index([testId])
+  @@index([isActive])
+  @@index([expiryDate])
+}
+
+// ============================================
+// QUALITY CONTROL - QC RESULTS (Resultados QC)
+// ============================================
+
+model QCResult {
+  id                String   @id @default(cuid())
+  qcLotId           String
+  performedById     String   // Usuario que realizó el QC
+  performedAt       DateTime @default(now())
+  obtainedValue     Float    // Valor obtenido
+  expectedValue     Float    // Valor esperado (copiado del lote)
+  deviation         Float    // Desviación del valor esperado
+  deviationSD       Float    // Desviación en unidades SD
+  isAccepted        Boolean  // ¿Está dentro de límites aceptables?
+  westgardRule      String?  // Regla Westgard violada (si aplica): 1:2s, 2:2s, R:4s, 4:1s, 10x
+  equipmentId       String?  // Equipo utilizado
+  reagentLotId      String?  // Lote de reactivo utilizado
+  correctionApplied String?  // Acción correctiva aplicada
+  notes             String?
+  createdAt         DateTime @default(now())
+
+  // Relations
+  qcLot             QCLot    @relation(fields: [qcLotId], references: [id], onDelete: Cascade)
+
+  @@index([qcLotId])
+  @@index([performedAt])
+  @@index([isAccepted])
+}
+
+// ============================================
+// SAMPLE CHAIN OF CUSTODY (Cadena de Custodia)
+// ============================================
+
+enum CustodyEventType {
+  RECEIVED          // Recepción de muestra
+  REGISTERED        // Registro en sistema
+  STORED            // Almacenamiento
+  RETRIEVED         // Recuperación para análisis
+  PROCESSED         // Procesamiento/Análisis
+  ALIQUOTED         // División en alícuotas
+  TRANSFERRED       // Transferencia a otro área
+  DISCARDED         // Descarte
+  ARCHIVED          // Archivo
+}
+
+model SampleCustody {
+  id                String           @id @default(cuid())
+  sampleId          String
+  eventType         CustodyEventType
+  performedById     String           // Usuario que realizó la acción
+  performedAt       DateTime         @default(now())
+  fromLocation      String?          // Ubicación origen
+  toLocation        String?          // Ubicación destino
+  temperature       Float?           // Temperatura al momento (°C)
+  condition         String?          // Condición de la muestra
+  notes             String?
+  witnessId         String?          // Testigo (para eventos críticos)
+
+  // Relations
+  sample            Sample           @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+
+  @@index([sampleId])
+  @@index([eventType])
+  @@index([performedAt])
+}
+
+// ============================================
+// SAMPLE REJECTION (Rechazos de Muestras)
+// ============================================
+
+model SampleRejection {
+  id                String   @id @default(cuid())
+  sampleId          String
+  rejectedById      String   // Usuario que rechazó
+  rejectedAt        DateTime @default(now())
+  reason            String   // Razón del rechazo
+  category          String   // HEMOLYSIS, LIPEMIA, INSUFFICIENT, CONTAMINATED, EXPIRED, OTHER
+  description       String?  // Descripción detallada
+  actionTaken       String?  // Acción tomada: Nueva muestra, Análisis parcial, etc.
+  newSampleId       String?  // ID de la nueva muestra (si se solicitó)
+  notifiedTo        String?  // A quién se notificó
+  notifiedAt        DateTime?
+
+  // Relations
+  sample            Sample   @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+
+  @@index([sampleId])
+  @@index([category])
+  @@index([rejectedAt])
+}
+
+// ============================================
+// REAGENT LOT USAGE (Trazabilidad de Reactivos)
+// ============================================
+
+model ReagentUsage {
+  id                String   @id @default(cuid())
+  reagentId         String
+  sampleTestId      String?  // Prueba en la que se usó
+  qcResultId        String?  // Resultado QC en el que se usó
+  usedById          String   // Usuario
+  usedAt            DateTime @default(now())
+  quantityUsed      Float    // Cantidad utilizada
+  unit              String   // Unidad
+  notes             String?
+
+  // Relations
+  reagent           Reagent  @relation(fields: [reagentId], references: [id])
+
+  @@index([reagentId])
+  @@index([sampleTestId])
+  @@index([usedAt])
+}
+
+// ============================================
+// TEMPERATURE LOGS (Registros de Temperatura)
+// ============================================
+
+model TemperatureLog {
+  id                String   @id @default(cuid())
+  equipmentId       String?  // Equipo (refrigerador, incubadora)
+  location          String   // Ubicación (Refrigerador 1, Incubadora 37°C)
+  temperature       Float    // Temperatura registrada
+  humidity          Float?   // Humedad (si aplica)
+  recordedAt        DateTime @default(now())
+  recordedById      String?  // Usuario (si manual) o null (si automático)
+  isAutomatic       Boolean  @default(false)
+  isOutOfRange      Boolean  @default(false)
+  minAcceptable     Float?   // Límite mínimo aceptable
+  maxAcceptable     Float?   // Límite máximo aceptable
+  correctionApplied String?  // Acción correctiva si fuera de rango
+  notes             String?
+
+  @@index([location])
+  @@index([recordedAt])
+  @@index([isOutOfRange])
+}
+
+// ============================================
+// REPORT VERSIONS (Versiones de Informes)
+// ============================================
+
+model ReportVersion {
+  id                String   @id @default(cuid())
+  reportId          String   // ID del informe original
+  version           Int      // Número de versión (1, 2, 3...)
+  reason            String   // Razón de la nueva versión
+  changes           String?  // JSON: Cambios realizados
+  previousPdfUrl    String?  // URL del PDF anterior
+  newPdfUrl         String   // URL del nuevo PDF
+  createdById       String   // Usuario que creó la versión
+  createdAt         DateTime @default(now())
+  approvedById      String?  // Usuario que aprobó
+  approvedAt        DateTime?
+  digitalSignature  String?  // Firma digital
+
+  @@index([reportId])
+  @@index([version])
+  @@index([createdAt])
+}
+
+// ============================================
+// DIGITAL SIGNATURES (Firmas Digitales)
+// ============================================
+
+model DigitalSignature {
+  id                String   @id @default(cuid())
+  userId            String
+  entityType        String   // Report, SampleTest, QCResult
+  entityId          String
+  signatureHash     String   // Hash de la firma
+  signedAt          DateTime @default(now())
+  ipAddress         String?
+  deviceInfo        String?
+  isValid           Boolean  @default(true)
+  invalidatedAt     DateTime?
+  invalidatedReason String?
+
+  @@unique([entityType, entityId, userId])
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([signedAt])
 }
