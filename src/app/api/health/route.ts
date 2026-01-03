@@ -2,6 +2,16 @@ import { NextResponse } from 'next/server'
 
 export const dynamic = 'force-dynamic'
 
+// HEAD para verificación rápida de latencia (usado por useConnectionQuality)
+export async function HEAD() {
+  return new Response(null, {
+    status: 200,
+    headers: {
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+    },
+  })
+}
+
 export async function GET() {
   try {
     // Verificar conexión a base de datos (opcional)
