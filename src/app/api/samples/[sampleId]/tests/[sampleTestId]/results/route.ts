@@ -3,10 +3,14 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/options'
 import { db } from '@/lib/db'
 
+interface RouteParams {
+  params: Promise<{ sampleId: string; sampleTestId: string }>
+}
+
 // POST /api/samples/[sampleId]/tests/[sampleTestId]/results - Guardar resultados de prueba
 export async function POST(
   request: NextRequest,
-  { params }: { params: { sampleId: string; sampleTestId: string } }
+  { params }: RouteParams
 ) {
   try {
     const session = await getServerSession(authOptions)
@@ -18,7 +22,7 @@ export async function POST(
       )
     }
 
-    const { sampleTestId } = params
+    const { sampleId, sampleTestId } = await params
     const formData = await request.formData()
     
     // Obtener datos del formulario
@@ -159,16 +163,16 @@ export async function POST(
 
     // Actualizar estado de la muestra si todas las pruebas están completadas
     const allTests = await db.sampleTest.findMany({
-      where: { sampleId: params.sampleId }
+      where: { sampleId }
     })
 
-    const allCompleted = allTests.every(t => 
+    const allCompleted = allTests.every(t =>
       t.status === 'COMPLETED' || t.status === 'AWAITING_VALIDATION'
     )
 
     if (allCompleted) {
       await db.sample.update({
-        where: { id: params.sampleId },
+        where: { id: sampleId },
         data: { status: 'ANALYZED' }
       })
     }

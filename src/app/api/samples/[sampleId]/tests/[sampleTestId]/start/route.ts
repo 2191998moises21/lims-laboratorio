@@ -3,10 +3,14 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/options'
 import { db } from '@/lib/db'
 
+interface RouteParams {
+  params: Promise<{ sampleId: string; sampleTestId: string }>
+}
+
 // POST /api/samples/[sampleId]/tests/[sampleTestId]/start - Iniciar una prueba
 export async function POST(
   request: NextRequest,
-  { params }: { params: { sampleId: string; sampleTestId: string } }
+  { params }: RouteParams
 ) {
   try {
     const session = await getServerSession(authOptions)
@@ -18,7 +22,7 @@ export async function POST(
       )
     }
 
-    const { sampleTestId } = params
+    const { sampleTestId } = await params
 
     // Verificar que la prueba existe y pertenece a esta muestra
     const sampleTest = await db.sampleTest.findUnique({

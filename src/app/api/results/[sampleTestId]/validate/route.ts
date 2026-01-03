@@ -3,10 +3,14 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/options'
 import { db } from '@/lib/db'
 
+interface RouteParams {
+  params: Promise<{ sampleTestId: string }>
+}
+
 // POST /api/results/[sampleTestId]/validate - Validar o invalidar resultado
 export async function POST(
   request: NextRequest,
-  { params }: { params: { sampleTestId: string } }
+  { params }: RouteParams
 ) {
   try {
     const session = await getServerSession(authOptions)
@@ -29,7 +33,7 @@ export async function POST(
       )
     }
 
-    const sampleTestId = params.sampleTestId
+    const { sampleTestId } = await params
 
     // Obtener la prueba
     const sampleTest = await db.sampleTest.findUnique({
