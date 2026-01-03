@@ -39,11 +39,7 @@ export async function GET(
               }
             },
             assignedTo: true,
-            results: {
-              include: {
-                parameter: true
-              }
-            }
+            results: true
           },
           orderBy: {
             createdAt: 'asc'
