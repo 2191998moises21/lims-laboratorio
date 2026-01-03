@@ -131,7 +131,7 @@ export async function POST(request: NextRequest) {
     await db.auditLog.create({
       data: {
         userId: session.user.id,
-        action: 'MAINTAIN',
+        action: 'UPDATE',
         entityType: 'Equipment',
         entityId: equipmentId,
         entityName: `${equipment.serialNumber} - ${equipment.name}`,
