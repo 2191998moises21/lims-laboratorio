@@ -21,6 +21,17 @@ export const metadata: Metadata = {
   authors: [{ name: "Laboratorio de Bioanálisis" }],
   icons: {
     icon: "/logo.svg",
+    apple: "/icons/icon-192x192.png",
+  },
+  manifest: "/manifest.json",
+  themeColor: "#0ea5e9",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "LIMS Lab",
+  },
+  formatDetection: {
+    telephone: false,
   },
 };
 
