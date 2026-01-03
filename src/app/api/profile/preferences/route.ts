@@ -3,6 +3,12 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/options'
 import { db } from '@/lib/db'
 
+interface NotificationPreferences {
+  notifications?: boolean
+  emailNotifications?: boolean
+  darkMode?: boolean
+}
+
 // PATCH /api/profile/preferences - Actualizar preferencias
 export async function PATCH(request: NextRequest) {
   try {
@@ -18,15 +24,34 @@ export async function PATCH(request: NextRequest) {
     const body = await request.json()
     const { notifications, emailNotifications, darkMode } = body
 
-    // Actualizar preferencias
+    // Obtener preferencias actuales
+    const currentUser = await db.user.findUnique({
+      where: { id: session.user.id },
+      select: { notificationPreferences: true }
+    })
+
+    // Parsear preferencias existentes
+    let currentPreferences: NotificationPreferences = {}
+    if (currentUser?.notificationPreferences) {
+      try {
+        currentPreferences = JSON.parse(currentUser.notificationPreferences)
+      } catch {
+        currentPreferences = {}
+      }
+    }
+
+    // Merge con nuevas preferencias
+    const newPreferences: NotificationPreferences = {
+      notifications: notifications !== undefined ? notifications : currentPreferences.notifications,
+      emailNotifications: emailNotifications !== undefined ? emailNotifications : currentPreferences.emailNotifications,
+      darkMode: darkMode !== undefined ? darkMode : currentPreferences.darkMode
+    }
+
+    // Actualizar preferencias como JSON string
     const updatedUser = await db.user.update({
       where: { id: session.user.id },
       data: {
-        preferences: {
-          notifications: notifications !== undefined ? notifications : session.user.preferences?.notifications,
-          emailNotifications: emailNotifications !== undefined ? emailNotifications : session.user.preferences?.emailNotifications,
-          darkMode: darkMode !== undefined ? darkMode : session.user.preferences?.darkMode
-        }
+        notificationPreferences: JSON.stringify(newPreferences)
       }
     })
 
@@ -39,12 +64,15 @@ export async function PATCH(request: NextRequest) {
         entityId: session.user.id,
         entityName: updatedUser.name,
         changes: JSON.stringify({
-          preferencesUpdated: { notifications, emailNotifications, darkMode }
+          preferencesUpdated: newPreferences
         })
       }
     })
 
-    return NextResponse.json(updatedUser)
+    return NextResponse.json({
+      ...updatedUser,
+      preferences: newPreferences
+    })
   } catch (error) {
     console.error('Error updating preferences:', error)
     return NextResponse.json(
