@@ -17,25 +17,20 @@ export async function GET(request: NextRequest) {
 
     const searchParams = request.nextUrl.searchParams
     const equipmentId = searchParams.get('equipmentId') || ''
-    const status = searchParams.get('status') || ''
 
-    const where: any = {}
+    const where: Record<string, string> = {}
 
     if (equipmentId) {
       where.equipmentId = equipmentId
     }
 
-    if (status) {
-      where.status = status
-    }
-
-    const calibrations = await db.equipmentCalibration.findMany({
+    const calibrations = await db.calibration.findMany({
       where,
       include: {
         equipment: {
           select: {
             name: true,
-            code: true
+            serialNumber: true
           }
         }
       },
@@ -80,12 +75,13 @@ export async function POST(request: NextRequest) {
       performedBy,
       results,
       nextCalibrationDate,
-      notes
+      notes,
+      certificateUrl
     } = body
 
-    if (!equipmentId || !calibrationDate) {
+    if (!equipmentId || !calibrationDate || !performedBy || !results) {
       return NextResponse.json(
-        { error: 'Faltan datos requeridos' },
+        { error: 'Faltan datos requeridos (equipmentId, calibrationDate, performedBy, results)' },
         { status: 400 }
       )
     }
@@ -103,25 +99,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Crear calibración
-    const calibration = await db.equipmentCalibration.create({
+    const calibration = await db.calibration.create({
       data: {
         equipmentId,
         calibrationDate: new Date(calibrationDate),
-        performedBy: performedBy || null,
-        results: results || null,
+        performedBy,
+        results,
         nextCalibrationDate: nextCalibrationDate ? new Date(nextCalibrationDate) : null,
         notes: notes || null,
-        status: 'COMPLETED'
-      }
-    })
-
-    // Actualizar equipo
-    await db.equipment.update({
-      where: { id: equipmentId },
-      data: {
-        lastCalibrationDate: new Date(calibrationDate),
-        nextCalibrationDate: nextCalibrationDate ? new Date(nextCalibrationDate) : null,
-        calibrationCount: equipment.calibrationCount + 1
+        certificateUrl: certificateUrl || null
       }
     })
 
@@ -132,7 +118,7 @@ export async function POST(request: NextRequest) {
         action: 'CALIBRATE',
         entityType: 'Equipment',
         entityId: equipmentId,
-        entityName: `${equipment.code} - ${equipment.name}`,
+        entityName: `${equipment.serialNumber} - ${equipment.name}`,
         changes: JSON.stringify({
           calibratedBy: performedBy,
           calibrationDate,
