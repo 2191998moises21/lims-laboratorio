@@ -17,25 +17,25 @@ export async function GET(request: NextRequest) {
 
     const searchParams = request.nextUrl.searchParams
     const equipmentId = searchParams.get('equipmentId') || ''
-    const status = searchParams.get('status') || ''
+    const maintenanceType = searchParams.get('maintenanceType') || ''
 
-    const where: any = {}
+    const where: Record<string, string> = {}
 
     if (equipmentId) {
       where.equipmentId = equipmentId
     }
 
-    if (status) {
-      where.status = status
+    if (maintenanceType) {
+      where.maintenanceType = maintenanceType
     }
 
-    const maintenances = await db.equipmentMaintenance.findMany({
+    const maintenances = await db.maintenance.findMany({
       where,
       include: {
         equipment: {
           select: {
             name: true,
-            code: true
+            serialNumber: true
           }
         }
       },
@@ -80,14 +80,23 @@ export async function POST(request: NextRequest) {
       maintenanceType,
       description,
       performedBy,
+      partsReplaced,
       cost,
       nextMaintenanceDate,
       notes
     } = body
 
-    if (!equipmentId || !maintenanceDate || !maintenanceType) {
+    if (!equipmentId || !maintenanceDate || !maintenanceType || !performedBy || !description) {
       return NextResponse.json(
-        { error: 'Faltan datos requeridos' },
+        { error: 'Faltan datos requeridos (equipmentId, maintenanceDate, maintenanceType, performedBy, description)' },
+        { status: 400 }
+      )
+    }
+
+    // Validar tipo de mantenimiento
+    if (!['PREVENTIVE', 'CORRECTIVE'].includes(maintenanceType)) {
+      return NextResponse.json(
+        { error: 'Tipo de mantenimiento inválido. Use PREVENTIVE o CORRECTIVE' },
         { status: 400 }
       )
     }
@@ -104,28 +113,17 @@ export async function POST(request: NextRequest) {
     }
 
     // Crear mantenimiento
-    const maintenance = await db.equipmentMaintenance.create({
+    const maintenance = await db.maintenance.create({
       data: {
         equipmentId,
         maintenanceDate: new Date(maintenanceDate),
         maintenanceType,
-        description: description || null,
-        performedBy: performedBy || null,
+        description,
+        performedBy,
+        partsReplaced: partsReplaced ? JSON.stringify(partsReplaced) : null,
         cost: cost ? parseFloat(cost) : null,
         nextMaintenanceDate: nextMaintenanceDate ? new Date(nextMaintenanceDate) : null,
-        notes: notes || null,
-        status: 'COMPLETED'
-      }
-    })
-
-    // Actualizar equipo
-    await db.equipment.update({
-      where: { id: equipmentId },
-      data: {
-        lastMaintenanceDate: new Date(maintenanceDate),
-        nextMaintenanceDate: nextMaintenanceDate ? new Date(nextMaintenanceDate) : null,
-        maintenanceCount: equipment.maintenanceCount + 1,
-        status: equipment.status === 'IN_MAINTENANCE' ? 'ACTIVE' : equipment.status
+        notes: notes || null
       }
     })
 
@@ -136,16 +134,14 @@ export async function POST(request: NextRequest) {
         action: 'MAINTAIN',
         entityType: 'Equipment',
         entityId: equipmentId,
-        entityName: `${equipment.code} - ${equipment.name}`,
+        entityName: `${equipment.serialNumber} - ${equipment.name}`,
         changes: JSON.stringify({
           maintenanceType,
           maintenanceDate,
+          performedBy,
+          description,
           cost,
-          nextMaintenanceDate,
-          statusChanged: {
-            from: equipment.status,
-            to: 'ACTIVE'
-          }
+          nextMaintenanceDate
         })
       }
     })
