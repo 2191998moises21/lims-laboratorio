@@ -3,10 +3,14 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/options'
 import { db } from '@/lib/db'
 
+interface RouteParams {
+  params: Promise<{ testId: string }>
+}
+
 // POST /api/tests/[testId]/parameters - Guardar parámetros de prueba
 export async function POST(
   request: NextRequest,
-  { params }: { params: { testId: string } }
+  { params }: RouteParams
 ) {
   try {
     const session = await getServerSession(authOptions)
@@ -36,7 +40,7 @@ export async function POST(
       )
     }
 
-    const testId = params.testId
+    const { testId } = await params
 
     // Verificar que la prueba existe
     const test = await db.test.findUnique({

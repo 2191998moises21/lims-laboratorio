@@ -3,10 +3,14 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/options'
 import { db } from '@/lib/db'
 
+interface RouteParams {
+  params: Promise<{ sampleId: string }>
+}
+
 // GET /api/samples/[sampleId] - Obtener detalles de una muestra
 export async function GET(
   request: NextRequest,
-  { params }: { params: { sampleId: string } }
+  { params }: RouteParams
 ) {
   try {
     const session = await getServerSession(authOptions)
@@ -18,7 +22,7 @@ export async function GET(
       )
     }
 
-    const sampleId = params.sampleId
+    const { sampleId } = await params
 
     const sample = await db.sample.findUnique({
       where: { id: sampleId },
@@ -69,7 +73,7 @@ export async function GET(
 // POST /api/samples/[sampleId]/tests - Asignar prueba a muestra
 export async function POST(
   request: NextRequest,
-  { params }: { params: { sampleId: string } }
+  { params }: RouteParams
 ) {
   try {
     const session = await getServerSession(authOptions)
@@ -81,7 +85,7 @@ export async function POST(
       )
     }
 
-    const sampleId = params.sampleId
+    const { sampleId } = await params
     const body = await request.json()
     const { testId, assignedToId } = body
 
