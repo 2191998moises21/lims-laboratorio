@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
         gender: sampleTest.sample.patient.gender
       },
       doctor: {
-        fullName: sampleTest.sample.doctor.fullName,
+        fullName: sampleTest.sample.doctor?.fullName || 'No especificado',
         specialty: null,
         healthCenter: null
       },
