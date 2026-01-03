@@ -17,30 +17,19 @@ export async function GET(request: NextRequest) {
 
     const searchParams = request.nextUrl.searchParams
     const search = searchParams.get('search') || ''
-    const type = searchParams.get('type') || ''
-    const category = searchParams.get('category') || ''
     const location = searchParams.get('location') || ''
     const status = searchParams.get('status') || ''
 
     // Construir where clause
-    const where: any = { isActive: true }
+    const where: Record<string, unknown> = { isActive: true }
 
     if (search) {
       where.OR = [
         { name: { contains: search } },
-        { code: { contains: search } },
         { manufacturer: { contains: search } },
         { model: { contains: search } },
         { serialNumber: { contains: search } }
       ]
-    }
-
-    if (type) {
-      where.type = type
-    }
-
-    if (category) {
-      where.category = { contains: category }
     }
 
     if (location) {
@@ -119,34 +108,32 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const {
       name,
-      code,
-      type,
-      category,
       manufacturer,
       model,
       serialNumber,
+      acquisitionDate,
       location,
       status,
       calibrationInterval,
-      maintenanceInterval
+      notes
     } = body
 
     // Validaciones
-    if (!name || !code || !type || !location) {
+    if (!name || !serialNumber) {
       return NextResponse.json(
-        { error: 'Faltan campos requeridos' },
+        { error: 'Nombre y número de serie son requeridos' },
         { status: 400 }
       )
     }
 
-    // Verificar código duplicado
+    // Verificar número de serie duplicado
     const existingEquipment = await db.equipment.findUnique({
-      where: { code }
+      where: { serialNumber }
     })
 
     if (existingEquipment) {
       return NextResponse.json(
-        { error: 'Ya existe un equipo con este código' },
+        { error: 'Ya existe un equipo con este número de serie' },
         { status: 409 }
       )
     }
@@ -155,17 +142,14 @@ export async function POST(request: NextRequest) {
     const equipment = await db.equipment.create({
       data: {
         name,
-        code: code.toUpperCase(),
-        type,
-        category,
         manufacturer: manufacturer || null,
         model: model || null,
-        serialNumber: serialNumber || null,
-        location,
+        serialNumber,
+        acquisitionDate: acquisitionDate ? new Date(acquisitionDate) : null,
+        location: location || null,
         status: status || 'ACTIVE',
         calibrationInterval: calibrationInterval ? parseInt(calibrationInterval) : null,
-        maintenanceInterval: maintenanceInterval ? parseInt(maintenanceInterval) : null,
-        installationDate: new Date(),
+        notes: notes || null,
         isActive: true
       }
     })
@@ -177,12 +161,13 @@ export async function POST(request: NextRequest) {
         action: 'CREATE',
         entityType: 'Equipment',
         entityId: equipment.id,
-        entityName: `${code} - ${name}`,
+        entityName: `${serialNumber} - ${name}`,
         changes: JSON.stringify({
           created: {
             name,
-            type,
-            category,
+            serialNumber,
+            manufacturer,
+            model,
             location,
             status
           }
