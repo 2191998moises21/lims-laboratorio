@@ -12,14 +12,6 @@ const nextConfig: NextConfig = {
   // React Strict Mode para detectar bugs
   reactStrictMode: true,
 
-  // ESLint en builds
-  eslint: {
-    // En desarrollo podemos ignorar, en producción debe fallar
-    ignoreDuringBuilds: process.env.NODE_ENV === 'development',
-    // Solo verificar directorios relevantes
-    dirs: ['src'],
-  },
-
   // Optimizaciones de imagen
   images: {
     remotePatterns: [
