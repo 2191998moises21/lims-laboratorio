@@ -127,11 +127,7 @@ export async function GET(request: NextRequest) {
           }
         },
         test: true,
-        results: {
-          include: {
-            parameter: true
-          }
-        },
+        results: true,
         validatedBy: true
       },
       orderBy: {
