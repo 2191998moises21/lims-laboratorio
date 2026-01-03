@@ -16,19 +16,19 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { reagentId, type, quantity, batchNumber, notes } = body
+    const { reagentId, transactionType, quantity, reason, referenceNumber } = body
 
     // Validaciones
-    if (!reagentId || !type || !quantity) {
+    if (!reagentId || !transactionType || !quantity) {
       return NextResponse.json(
-        { error: 'Faltan datos requeridos' },
+        { error: 'Faltan datos requeridos (reagentId, transactionType, quantity)' },
         { status: 400 }
       )
     }
 
-    if (type !== 'IN' && type !== 'OUT') {
+    if (!['ENTRY', 'EXIT', 'ADJUSTMENT'].includes(transactionType)) {
       return NextResponse.json(
-        { error: 'Tipo de transacción inválido' },
+        { error: 'Tipo de transacción inválido. Use ENTRY, EXIT o ADJUSTMENT' },
         { status: 400 }
       )
     }
@@ -52,78 +52,63 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const previousQuantity = reagent.quantity
+
     // Verificar si hay stock suficiente para salidas
-    if (type === 'OUT') {
-      const currentStock = await calculateCurrentStock(reagentId)
-      if (currentStock < quantity) {
-        return NextResponse.json(
-          { error: 'No hay suficiente stock' },
-          { status: 400 }
-        )
-      }
+    if (transactionType === 'EXIT' && previousQuantity < quantity) {
+      return NextResponse.json(
+        { error: 'No hay suficiente stock' },
+        { status: 400 }
+      )
+    }
+
+    // Calcular nueva cantidad
+    let newQuantity: number
+    if (transactionType === 'ENTRY') {
+      newQuantity = previousQuantity + quantity
+    } else if (transactionType === 'EXIT') {
+      newQuantity = previousQuantity - quantity
+    } else {
+      // ADJUSTMENT - la cantidad es el nuevo valor absoluto
+      newQuantity = quantity
     }
 
     // Crear transacción
     const transaction = await db.reagentTransaction.create({
       data: {
         reagentId,
-        type,
+        transactionType,
         quantity,
-        batchNumber: batchNumber || null,
-        notes: notes || null,
-        transactionDate: new Date(),
-        userId: session.user.id
+        previousQuantity,
+        newQuantity,
+        performedBy: session.user.name || session.user.email || 'Usuario',
+        reason: reason || null,
+        referenceNumber: referenceNumber || null,
+        transactionDate: new Date()
       }
     })
 
-    // Verificar alertas después de la transacción
-    const newCurrentStock = await calculateCurrentStock(reagentId)
-    let alertType: 'LOW_STOCK' | 'EXPIRING_SOON' | 'EXPIRED' | null = null
-
-    if (newCurrentStock <= reagent.minStockLevel) {
-      alertType = 'LOW_STOCK'
-    }
-
-    if (reagent.expirationDate) {
-      const today = new Date()
-      const expiration = new Date(reagent.expirationDate)
-      const daysUntilExpiration = Math.floor((expiration.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
-
-      if (daysUntilExpiration < 0) {
-        alertType = alertType ? alertType : 'EXPIRED'
-      } else if (daysUntilExpiration <= 30) {
-        alertType = alertType ? alertType : 'EXPIRING_SOON'
-      }
-    }
-
-    // Crear alertas si es necesario
-    if (alertType) {
-      await db.reagentAlert.create({
-        data: {
-          reagentId,
-          alertType,
-          alertMessage: getAlertMessage(alertType, reagent.name, newCurrentStock, reagent.expirationDate),
-          isResolved: false,
-          userId: session.user.id
-        }
-      })
-    }
+    // Actualizar cantidad del reactivo
+    await db.reagent.update({
+      where: { id: reagentId },
+      data: { quantity: newQuantity }
+    })
 
     // Crear entrada de auditoría
     await db.auditLog.create({
       data: {
         userId: session.user.id,
-        action: type === 'IN' ? 'STOCK_IN' : 'STOCK_OUT',
+        action: 'UPDATE',
         entityType: 'Reagent',
         entityId: reagent.id,
         entityName: reagent.name,
         changes: JSON.stringify({
-          transactionType: type,
+          transactionType,
           quantity,
-          batchNumber,
-          previousStock: reagent.currentStock,
-          newStock: newCurrentStock,
-          alertCreated: alertType
+          previousQuantity,
+          newQuantity,
+          reason,
+          referenceNumber
         })
       }
     })
@@ -131,7 +116,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       transaction,
-      newStock: newCurrentStock
+      previousStock: previousQuantity,
+      newStock: newQuantity
     }, { status: 201 })
   } catch (error) {
     console.error('Error creating reagent transaction:', error)
@@ -139,42 +125,5 @@ export async function POST(request: NextRequest) {
       { error: 'Error al registrar transacción' },
       { status: 500 }
     )
-  }
-}
-
-// Función auxiliar para calcular stock actual
-async function calculateCurrentStock(reagentId: string): Promise<number> {
-  const transactions = await db.reagentTransaction.findMany({
-    where: { reagentId },
-    orderBy: { createdAt: 'desc' }
-  })
-
-  const currentStock = transactions.reduce((stock, t) => {
-    if (t.type === 'IN') {
-      return stock + t.quantity
-    } else {
-      return stock - t.quantity
-    }
-  }, 0)
-
-  return currentStock
-}
-
-// Función auxiliar para obtener mensaje de alerta
-function getAlertMessage(
-  alertType: string,
-  reagentName: string,
-  currentStock: number,
-  expirationDate?: Date | null
-): string {
-  switch (alertType) {
-    case 'LOW_STOCK':
-      return `Bajo stock: ${reagentName} tiene solo ${currentStock} unidades`
-    case 'EXPIRING_SOON':
-      return `Caducidad próxima: ${reagentName} caduca el ${expirationDate?.toLocaleDateString('es-VE')}`
-    case 'EXPIRED':
-      return `Caducado: ${reagentName} está caducado desde ${expirationDate?.toLocaleDateString('es-VE')}`
-    default:
-      return ''
   }
 }
