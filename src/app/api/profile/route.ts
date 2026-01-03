@@ -16,7 +16,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { name, phone, title } = body
+    const { name, phone } = body
 
     // Validaciones
     if (!name || name.trim().length < 2) {
@@ -31,8 +31,7 @@ export async function PATCH(request: NextRequest) {
       where: { id: session.user.id },
       data: {
         name: name.trim(),
-        phone: phone ? phone.trim() : null,
-        title: title ? title.trim() : null
+        phone: phone ? phone.trim() : null
       }
     })
 
@@ -45,7 +44,7 @@ export async function PATCH(request: NextRequest) {
         entityId: session.user.id,
         entityName: updatedUser.name,
         changes: JSON.stringify({
-          updated: { name, phone, title }
+          updated: { name, phone }
         })
       }
     })
